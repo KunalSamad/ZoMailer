@@ -4,6 +4,7 @@ import requests
 import time
 from urllib.parse import urlencode, urlparse, parse_qs
 
+# QInputDialog is no longer needed
 from PyQt6.QtWidgets import QApplication, QMessageBox
 from PyQt6.QtCore import QUrl
 
@@ -34,11 +35,17 @@ class AppController:
         
         self.view.redirect_url_intercepted.connect(self.handle_redirect_url)
         
-        # --- New connection for the organization dropdown ---
-        self.view.dashboard_widget.organization_selector.currentIndexChanged.connect(
+        # Connect Dashboard signals
+        dashboard_ui = self.view.dashboard_widget
+        dashboard_ui.organization_selector.currentIndexChanged.connect(
             self.handle_organization_selection_changed
         )
+        dashboard_ui.change_sender_name_button.clicked.connect(self.handle_open_sender_settings)
         
+        # <<< NEW CONNECTION for the refresh button >>>
+        dashboard_ui.refresh_button.clicked.connect(self.handle_fetch_org_details)
+
+
         self.refresh_account_list()
 
     def run(self):
@@ -46,40 +53,55 @@ class AppController:
 
     def handle_organization_selection_changed(self):
         """Displays the details of the organization selected from the dropdown."""
-        # The full organization dictionary is stored as item data
         selected_org_data = self.view.dashboard_widget.organization_selector.currentData()
         self.view.dashboard_widget.display_organization_details(selected_org_data)
 
     def handle_fetch_org_details(self):
         """Fetches org data and populates the new organization dropdown."""
-        self.view.statusBar().showMessage("Fetching organization details...")
+        self.view.statusBar().showMessage("Refreshing organization details...")
         index = self.view.settings_tab.get_selected_account_index()
         if index is None or index <= 0:
-            self.view.statusBar().showMessage("Cannot fetch details: No authorized account selected.")
+            self.view.statusBar().showMessage("Cannot refresh: No authorized account selected.")
             return
 
         access_token = self.get_valid_access_token(index)
         if not access_token:
-            self.view.statusBar().showMessage("Failed to get access token.")
+            self.view.statusBar().showMessage("Refresh failed: Could not get access token.")
             return
 
         try:
             org_data = self.invoice_api.get_organizations(access_token)
             if org_data.get('code') == 0 and org_data.get('organizations'):
-                # --- FIX: Pass the entire list to the UI ---
                 organizations_list = org_data['organizations']
                 self.view.dashboard_widget.populate_organizations_list(organizations_list)
-                self.view.statusBar().showMessage(f"Successfully loaded {len(organizations_list)} organization(s).")
+                self.view.statusBar().showMessage(f"Successfully refreshed and loaded {len(organizations_list)} organization(s).")
             else:
                 message = org_data.get('message', 'Unknown API error.')
                 self.view.show_message("API Error", f"Failed to get organization details: {message}", level='critical')
-                self.view.dashboard_widget.clear_organization_details() # Clear display on error
+                self.view.dashboard_widget.clear_organization_details() 
         except Exception as e:
             self.view.show_message("Error", f"An error occurred while fetching data: {e}", level='critical')
-            self.view.dashboard_widget.clear_organization_details() # Clear display on error
+            self.view.dashboard_widget.clear_organization_details()
 
+    def handle_open_sender_settings(self):
+        """Opens the Zoho sender email settings page in the browser tab."""
+        selected_org_data = self.view.dashboard_widget.organization_selector.currentData()
+        
+        if not selected_org_data or 'organization_id' not in selected_org_data:
+            self.view.show_message(
+                "Action Blocked",
+                "Please select a valid organization from the dropdown first.",
+                level='warning'
+            )
+            return
+        
+        org_id = selected_org_data['organization_id']
+        # Construct the URL dynamically for the selected organization
+        url = f"https://invoice.zoho.com/app/{org_id}#/settings/emails/preference"
+        
+        self.view.open_url_in_browser_tab(url)
 
-    # ... (All other methods remain the same. I have reviewed them and they are compatible with this change.) ...
+    # ... (The rest of the methods remain the same) ...
     def get_valid_access_token(self, account_index: int) -> str | None:
         creds = self.config_manager.load_credentials(account_index)
         if not creds.get('refresh_token'):

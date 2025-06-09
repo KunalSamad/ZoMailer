@@ -25,12 +25,17 @@ class DashboardWidget(QWidget):
         layout.setAlignment(Qt.AlignmentFlag.AlignTop)
         layout.setSpacing(15)
         
-        # --- New Organization Selection Dropdown ---
+        # --- Organization Selection and Refresh Layout ---
         org_selection_layout = QHBoxLayout()
         org_selection_layout.addWidget(QLabel("<b>Select Organization:</b>"))
         self.organization_selector = QComboBox()
         self.organization_selector.setMinimumWidth(300)
+        
+        self.refresh_button = QPushButton("Refresh") # <<< NEW REFRESH BUTTON
+        self.refresh_button.setFixedWidth(100)
+        
         org_selection_layout.addWidget(self.organization_selector)
+        org_selection_layout.addWidget(self.refresh_button) # <<< ADDED TO LAYOUT
         org_selection_layout.addStretch()
         layout.addLayout(org_selection_layout)
 
@@ -39,14 +44,27 @@ class DashboardWidget(QWidget):
         details_layout.setSpacing(10)
         details_layout.setContentsMargins(0, 10, 0, 0) # Add some top margin
         
+        # --- Labels to display organization details ---
+        self.org_id_label = QLabel("...") 
         self.org_name_label = QLabel("...")
         self.contact_name_label = QLabel("...")
         self.email_label = QLabel("...")
         self.country_label = QLabel("...")
         self.currency_code_label = QLabel("...")
         
+        # --- Button to change sender name ---
+        self.change_sender_name_button = QPushButton("Change Sender Name") 
+        self.change_sender_name_button.setFixedWidth(160) 
+        contact_layout = QHBoxLayout()
+        contact_layout.setContentsMargins(0,0,0,0)
+        contact_layout.addWidget(self.contact_name_label)
+        contact_layout.addStretch()
+        contact_layout.addWidget(self.change_sender_name_button)
+
+        # --- Add rows to the form layout ---
+        details_layout.addRow("Organization ID:", self.org_id_label)
         details_layout.addRow("Organization Name:", self.org_name_label)
-        details_layout.addRow("Primary Contact:", self.contact_name_label)
+        details_layout.addRow("Primary Contact:", contact_layout) 
         details_layout.addRow("Email:", self.email_label)
         details_layout.addRow("Country:", self.country_label)
         details_layout.addRow("Currency:", self.currency_code_label)
@@ -78,6 +96,7 @@ class DashboardWidget(QWidget):
             self.clear_organization_details()
             return
             
+        self.org_id_label.setText(details.get('organization_id', 'N/A')) 
         self.org_name_label.setText(details.get('name', 'N/A'))
         self.contact_name_label.setText(details.get('contact_name', 'N/A'))
         self.email_label.setText(details.get('email', 'N/A'))
@@ -89,6 +108,7 @@ class DashboardWidget(QWidget):
     def clear_organization_details(self):
         """Resets the detail labels and organization dropdown to their default state."""
         placeholder_text = "N/A - Select an authorized account in Settings"
+        self.org_id_label.setText(placeholder_text) 
         self.org_name_label.setText(placeholder_text)
         self.contact_name_label.setText(placeholder_text)
         self.email_label.setText(placeholder_text)
