@@ -36,30 +36,72 @@ class AppController:
         
         # Connect Dashboard signals
         dashboard_ui = self.view.dashboard_widget
+        # This now triggers fetching org details AND items
         dashboard_ui.organization_selector.currentIndexChanged.connect(
             self.handle_organization_selection_changed
         )
         dashboard_ui.change_sender_name_button.clicked.connect(self.handle_open_sender_settings)
         dashboard_ui.view_email_templates_button.clicked.connect(self.handle_view_email_templates)
-        dashboard_ui.refresh_button.clicked.connect(self.handle_fetch_org_details)
+        # Refresh button now fetches both org details and items
+        dashboard_ui.refresh_button.clicked.connect(self.handle_refresh_all)
         dashboard_ui.add_item_button.clicked.connect(self.handle_add_item)
+        
+        # <<< NEW CONNECTION for the refresh items button >>>
+        dashboard_ui.refresh_items_button.clicked.connect(self.handle_fetch_items)
+
 
         self.refresh_account_list()
 
     def run(self):
         self.view.show()
 
-    # <<< MODIFIED to pass the organization_id to the API call >>>
+    def handle_refresh_all(self):
+        """Refreshes both organization details and the item list."""
+        self.handle_fetch_org_details()
+        self.handle_fetch_items()
+
+    # <<< NEW METHOD to fetch and display items >>>
+    def handle_fetch_items(self):
+        """Fetches the item list for the selected organization and populates the table."""
+        self.view.statusBar().showMessage("Fetching items...")
+        
+        # Get organization ID
+        selected_org_data = self.view.dashboard_widget.organization_selector.currentData()
+        if not selected_org_data or 'organization_id' not in selected_org_data:
+            self.view.statusBar().showMessage("Select an organization to view items.")
+            self.view.dashboard_widget.populate_items_table([]) # Clear table
+            return
+        organization_id = selected_org_data['organization_id']
+
+        # Get access token
+        account_index = self.view.settings_tab.get_selected_account_index()
+        access_token = self.get_valid_access_token(account_index)
+        if not access_token:
+            self.view.show_message("Authentication Error", "Could not get access token to fetch items.", level='critical')
+            self.view.statusBar().showMessage("Ready")
+            return
+
+        try:
+            response = self.invoice_api.get_items(access_token, organization_id)
+            if response.get('code') == 0:
+                items_list = response.get('items', [])
+                self.view.dashboard_widget.populate_items_table(items_list)
+                self.view.statusBar().showMessage(f"Successfully fetched {len(items_list)} item(s).")
+            else:
+                message = response.get('message', 'An unknown API error occurred.')
+                self.view.show_message("API Error", f"Could not fetch items: {message}", level='critical')
+        except Exception as e:
+            self.view.show_message("Error", f"An unexpected error occurred while fetching items: {e}", level='critical')
+            self.view.statusBar().showMessage("Ready")
+
+
     def handle_add_item(self):
         """Handles the logic for the 'Add Item' button click."""
         dashboard_ui = self.view.dashboard_widget
-        
-        # 1. Get data from the form
         item_name = dashboard_ui.item_name_input.text().strip()
         rate_str = dashboard_ui.item_rate_input.text().strip()
         description = dashboard_ui.item_description_input.toPlainText().strip()
 
-        # 2. Validate the data
         if not item_name or not rate_str:
             self.view.show_message("Input Error", "Item Name and Rate are required.", level='warning')
             return
@@ -70,14 +112,12 @@ class AppController:
             self.view.show_message("Input Error", "Rate must be a valid number.", level='warning')
             return
 
-        # 3. Get the currently selected organization ID
         selected_org_data = dashboard_ui.organization_selector.currentData()
         if not selected_org_data or 'organization_id' not in selected_org_data:
             self.view.show_message("Error", "Please select a valid organization from the 'Account Details' tab first.", level='critical')
             return
         organization_id = selected_org_data['organization_id']
 
-        # 4. Get a valid access token
         self.view.statusBar().showMessage("Authenticating...")
         account_index = self.view.settings_tab.get_selected_account_index()
         if account_index is None:
@@ -91,21 +131,15 @@ class AppController:
             self.view.statusBar().showMessage("Ready")
             return
 
-        # 5. Construct payload and call API
         self.view.statusBar().showMessage(f"Adding item '{item_name}'...")
-        item_payload = {
-            "name": item_name,
-            "rate": rate,
-            "description": description
-        }
+        item_payload = { "name": item_name, "rate": rate, "description": description }
 
         try:
-            # Pass the organization_id along with the other data
             response = self.invoice_api.create_item(access_token, organization_id, item_payload)
-            
             if response.get('code') == 0:
                 self.view.show_message("Success", f"Item '{item_name}' was added successfully.")
                 dashboard_ui.clear_add_item_form()
+                self.handle_fetch_items() # Refresh the item list after adding a new one
             else:
                 message = response.get('message', 'An unknown API error occurred.')
                 self.view.show_message("API Error", f"Could not add item: {message}", level='critical')
@@ -115,14 +149,15 @@ class AppController:
             self.view.statusBar().showMessage("Ready")
 
     def handle_organization_selection_changed(self):
-        """Displays the details of the organization selected from the dropdown."""
+        """Displays org details and fetches items for the selected org."""
         selected_org_data = self.view.dashboard_widget.organization_selector.currentData()
         self.view.dashboard_widget.display_organization_details(selected_org_data)
+        # Automatically fetch items when a new organization is selected
+        if selected_org_data:
+            self.handle_fetch_items()
         
     def handle_view_email_templates(self):
-        """Opens the Zoho invoice email templates list page in the browser tab."""
         selected_org_data = self.view.dashboard_widget.organization_selector.currentData()
-        
         if not selected_org_data or 'organization_id' not in selected_org_data:
             self.view.show_message("Action Blocked", "Please select a valid organization from the dropdown first.", level='warning')
             return
@@ -134,7 +169,7 @@ class AppController:
         self.view.open_url_in_browser_tab(url)
 
     def handle_fetch_org_details(self):
-        """Fetches org data and populates the new organization dropdown."""
+        """Fetches org data and populates the organization dropdown."""
         self.view.statusBar().showMessage("Refreshing organization details...")
         index = self.view.settings_tab.get_selected_account_index()
         if index is None or index <= 0:
@@ -161,9 +196,7 @@ class AppController:
             self.view.dashboard_widget.clear_organization_details()
 
     def handle_open_sender_settings(self):
-        """Opens the Zoho sender email settings page in the browser tab."""
         selected_org_data = self.view.dashboard_widget.organization_selector.currentData()
-        
         if not selected_org_data or 'organization_id' not in selected_org_data:
             self.view.show_message("Action Blocked","Please select a valid organization from the dropdown first.", level='warning')
             return
@@ -181,9 +214,7 @@ class AppController:
         if expiry_ts > time.time() + 30:
             return creds.get('access_token')
         try:
-            token_data = self.auth_manager.refresh_access_token(
-                creds['client_id'], creds['client_secret'], creds['refresh_token']
-            )
+            token_data = self.auth_manager.refresh_access_token(creds['client_id'], creds['client_secret'], creds['refresh_token'])
             data_to_save = {
                 'access_token': token_data['access_token'],
                 'token_expiry_timestamp': int(time.time()) + token_data.get('expires_in', 3600)

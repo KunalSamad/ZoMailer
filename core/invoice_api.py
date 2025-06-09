@@ -30,23 +30,32 @@ class InvoiceApi:
         except requests.exceptions.RequestException as e:
             raise ConnectionError(f"Failed to fetch organizations: {e}") from e
 
-    # <<< FINAL AND DEFINITIVE CORRECTION >>>
+    # <<< NEW METHOD to get the list of items >>>
+    def get_items(self, access_token: str, organization_id: str) -> dict:
+        """
+        Fetches the list of items for a specific organization.
+        """
+        headers = self._get_auth_headers(access_token)
+        endpoint = f"{self.base_url}/items?organization_id={organization_id}"
+
+        try:
+            response = requests.get(endpoint, headers=headers)
+            response.raise_for_status()
+            return response.json()
+        except requests.exceptions.RequestException as e:
+            raise ConnectionError(f"Failed to fetch items: {e}") from e
+
+
     def create_item(self, access_token: str, organization_id: str, item_data: dict) -> dict:
         """
         Creates a new item in Zoho Invoice for a specific organization.
         """
         headers = self._get_auth_headers(access_token)
-        
-        # --- The Fix ---
-        # According to the API documentation for this specific endpoint,
-        # the organization_id MUST be passed as a URL query parameter.
         endpoint = f"{self.base_url}/items?organization_id={organization_id}"
         
-        # The payload should only contain the item's details.
-        payload = item_data
+        payload = item_data.copy()
 
         try:
-            # The request is sent to the new, correctly formatted URL.
             response = requests.post(endpoint, headers=headers, json=payload)
             response.raise_for_status()
             return response.json()

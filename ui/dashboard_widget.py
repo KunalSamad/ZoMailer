@@ -1,8 +1,9 @@
 # ui/dashboard_widget.py
-# The main widget for the Dashboard tab, now with an "Add Item" form.
+# The main widget for the Dashboard tab.
 
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QTabWidget, QLabel, QPushButton, 
-                             QFormLayout, QHBoxLayout, QComboBox, QLineEdit, QTextEdit)
+                             QFormLayout, QHBoxLayout, QComboBox, QLineEdit, QTextEdit,
+                             QTableWidget, QTableWidgetItem, QHeaderView, QGroupBox)
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QDoubleValidator
 
@@ -19,17 +20,23 @@ class DashboardWidget(QWidget):
         self.account_details_tab = self._create_account_details_tab()
         self.sub_tabs.addTab(self.account_details_tab, "Account Details")
         
-        # <<< CREATE AND ADD THE NEW "ADD ITEM" TAB >>>
-        self.add_item_tab = self._create_add_item_tab()
-        self.sub_tabs.addTab(self.add_item_tab, "Add Item")
+        # <<< CREATE AND ADD THE NEW COMBINED "ITEMS" TAB >>>
+        self.items_tab = self._create_items_tab()
+        self.sub_tabs.addTab(self.items_tab, "Items")
 
-    def _create_add_item_tab(self):
-        """Creates the UI for the 'Add Item' sub-tab."""
+
+    # <<< NEW METHOD for the combined "Items" tab >>>
+    def _create_items_tab(self):
+        """Creates the UI for the combined 'Items' tab."""
         tab_widget = QWidget()
-        layout = QVBoxLayout(tab_widget)
-        layout.setAlignment(Qt.AlignmentFlag.AlignTop)
-        layout.setSpacing(15)
+        main_layout = QVBoxLayout(tab_widget)
+        main_layout.setSpacing(15)
 
+        # --- Section 1: Add New Item Form ---
+        add_item_groupbox = QGroupBox("Add New Item")
+        add_item_layout = QVBoxLayout(add_item_groupbox)
+        add_item_layout.setSpacing(10)
+        
         form_layout = QFormLayout()
         
         self.item_name_input = QLineEdit()
@@ -41,7 +48,7 @@ class DashboardWidget(QWidget):
 
         self.item_description_input = QTextEdit()
         self.item_description_input.setPlaceholderText("A detailed description of the service or product.")
-        self.item_description_input.setFixedHeight(100)
+        self.item_description_input.setFixedHeight(80)
         
         form_layout.addRow("<b>Item Name:*</b>", self.item_name_input)
         form_layout.addRow("<b>Rate:*</b>", self.item_rate_input)
@@ -55,10 +62,37 @@ class DashboardWidget(QWidget):
         buttons_layout.addStretch()
         buttons_layout.addWidget(self.add_item_button)
 
-        layout.addLayout(form_layout)
-        layout.addLayout(buttons_layout)
+        add_item_layout.addLayout(form_layout)
+        add_item_layout.addLayout(buttons_layout)
+        main_layout.addWidget(add_item_groupbox)
+
+        # --- Section 2: View Existing Items ---
+        view_items_groupbox = QGroupBox("Existing Items")
+        view_items_layout = QVBoxLayout(view_items_groupbox)
+        view_items_layout.setSpacing(10)
+
+        top_layout = QHBoxLayout()
+        self.refresh_items_button = QPushButton("Refresh Item List")
+        self.refresh_items_button.setFixedWidth(150)
+        top_layout.addStretch()
+        top_layout.addWidget(self.refresh_items_button)
+        view_items_layout.addLayout(top_layout)
+
+        self.items_table = QTableWidget()
+        self.items_table.setColumnCount(3)
+        self.items_table.setHorizontalHeaderLabels(["Name", "Rate", "Description"])
+        self.items_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.items_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Interactive)
+        self.items_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Interactive)
+        self.items_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+        self.items_table.setWordWrap(True)
+        
+        view_items_layout.addWidget(self.items_table)
+        main_layout.addWidget(view_items_groupbox)
         
         return tab_widget
+
+    # <<< The old _create_view_items_tab and _create_add_item_tab are now removed >>>
 
     def _create_account_details_tab(self):
         """Creates the UI for the 'Account Details' sub-tab."""
@@ -72,8 +106,8 @@ class DashboardWidget(QWidget):
         self.organization_selector = QComboBox()
         self.organization_selector.setMinimumWidth(300)
         
-        self.refresh_button = QPushButton("Refresh")
-        self.refresh_button.setFixedWidth(100)
+        self.refresh_button = QPushButton("Refresh Details")
+        self.refresh_button.setFixedWidth(120)
         
         org_selection_layout.addWidget(self.organization_selector)
         org_selection_layout.addWidget(self.refresh_button)
@@ -119,8 +153,31 @@ class DashboardWidget(QWidget):
         layout.addLayout(details_layout)
         return tab_widget
 
+    def populate_items_table(self, items: list):
+        """Clears and populates the items table with new data."""
+        self.items_table.setRowCount(0)
+        if not items:
+            return
+
+        self.items_table.setRowCount(len(items))
+        for row, item in enumerate(items):
+            rate = f"{item.get('rate', 0.0):.2f}"
+            
+            name_item = QTableWidgetItem(item.get('name', 'N/A'))
+            rate_item = QTableWidgetItem(rate)
+            desc_item = QTableWidgetItem(item.get('description', ''))
+            
+            rate_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+
+            self.items_table.setItem(row, 0, name_item)
+            self.items_table.setItem(row, 1, rate_item)
+            self.items_table.setItem(row, 2, desc_item)
+        
+        self.items_table.resizeColumnsToContents()
+        self.items_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+
+
     def populate_organizations_list(self, organizations: list):
-        """Populates the organization dropdown with a list of organizations."""
         self.organization_selector.blockSignals(True)
         self.organization_selector.clear()
         
@@ -135,7 +192,6 @@ class DashboardWidget(QWidget):
             self.organization_selector.currentIndexChanged.emit(0)
 
     def display_organization_details(self, details: dict | None):
-        """Populates the labels with data from a single organization dictionary."""
         if not details:
             self.clear_organization_details()
             return
@@ -150,7 +206,6 @@ class DashboardWidget(QWidget):
         )
         
     def clear_organization_details(self):
-        """Resets the detail labels and organization dropdown to their default state."""
         placeholder_text = "N/A - Select an authorized account in Settings"
         self.org_id_label.setText(placeholder_text) 
         self.org_name_label.setText(placeholder_text)
@@ -164,8 +219,9 @@ class DashboardWidget(QWidget):
         self.organization_selector.addItem("N/A", None)
         self.organization_selector.blockSignals(False)
 
+        self.populate_items_table([])
+
     def clear_add_item_form(self):
-        """Clears all input fields in the 'Add Item' form."""
         self.item_name_input.clear()
         self.item_rate_input.clear()
         self.item_description_input.clear()
