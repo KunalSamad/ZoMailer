@@ -31,18 +31,18 @@ class DashboardWidget(QWidget):
         self.organization_selector = QComboBox()
         self.organization_selector.setMinimumWidth(300)
         
-        self.refresh_button = QPushButton("Refresh") # <<< NEW REFRESH BUTTON
+        self.refresh_button = QPushButton("Refresh")
         self.refresh_button.setFixedWidth(100)
         
         org_selection_layout.addWidget(self.organization_selector)
-        org_selection_layout.addWidget(self.refresh_button) # <<< ADDED TO LAYOUT
+        org_selection_layout.addWidget(self.refresh_button)
         org_selection_layout.addStretch()
         layout.addLayout(org_selection_layout)
 
         # Details layout for displaying information
         details_layout = QFormLayout()
         details_layout.setSpacing(10)
-        details_layout.setContentsMargins(0, 10, 0, 0) # Add some top margin
+        details_layout.setContentsMargins(0, 10, 0, 0)
         
         # --- Labels to display organization details ---
         self.org_id_label = QLabel("...") 
@@ -52,14 +52,23 @@ class DashboardWidget(QWidget):
         self.country_label = QLabel("...")
         self.currency_code_label = QLabel("...")
         
-        # --- Button to change sender name ---
+        # --- Buttons for contextual actions ---
         self.change_sender_name_button = QPushButton("Change Sender Name") 
         self.change_sender_name_button.setFixedWidth(160) 
+
+        self.view_email_templates_button = QPushButton("View Email Templates")
+        self.view_email_templates_button.setFixedWidth(160)
+
         contact_layout = QHBoxLayout()
         contact_layout.setContentsMargins(0,0,0,0)
         contact_layout.addWidget(self.contact_name_label)
         contact_layout.addStretch()
         contact_layout.addWidget(self.change_sender_name_button)
+        
+        template_actions_layout = QHBoxLayout()
+        template_actions_layout.setContentsMargins(0,0,0,0)
+        template_actions_layout.addWidget(self.view_email_templates_button)
+        template_actions_layout.addStretch()
 
         # --- Add rows to the form layout ---
         details_layout.addRow("Organization ID:", self.org_id_label)
@@ -68,24 +77,23 @@ class DashboardWidget(QWidget):
         details_layout.addRow("Email:", self.email_label)
         details_layout.addRow("Country:", self.country_label)
         details_layout.addRow("Currency:", self.currency_code_label)
+        details_layout.addRow("Actions:", template_actions_layout)
         
         layout.addLayout(details_layout)
         return tab_widget
 
     def populate_organizations_list(self, organizations: list):
         """Populates the organization dropdown with a list of organizations."""
-        self.organization_selector.blockSignals(True) # Prevent signals during population
+        self.organization_selector.blockSignals(True)
         self.organization_selector.clear()
         
         if not organizations:
             self.organization_selector.addItem("No organizations found.", None)
         else:
             for org in organizations:
-                # Add the organization name as the text, and the whole org dictionary as the data
                 self.organization_selector.addItem(org.get('name', 'Unnamed Org'), org)
                 
         self.organization_selector.blockSignals(False)
-        # Manually trigger the first display after populating
         if self.organization_selector.count() > 0:
             self.organization_selector.currentIndexChanged.emit(0)
 
@@ -115,7 +123,6 @@ class DashboardWidget(QWidget):
         self.country_label.setText(placeholder_text)
         self.currency_code_label.setText(placeholder_text)
         
-        # Also clear the organization list
         self.organization_selector.blockSignals(True)
         self.organization_selector.clear()
         self.organization_selector.addItem("N/A", None)
