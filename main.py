@@ -1,7 +1,7 @@
 # main.py
 import sys
 import requests
-import time # Import the time module
+import time
 from urllib.parse import urlencode, urlparse, parse_qs
 
 from PyQt6.QtWidgets import QApplication, QMessageBox
@@ -10,18 +10,20 @@ from PyQt6.QtCore import QUrl
 from ui.main_window import MainWindow
 from ui.settings_tab import SettingsTab
 from core.config_manager import ConfigManager
-from core.auth_manager import AuthManager # Import the new AuthManager
+from core.auth_manager import AuthManager
+from core.invoice_api import InvoiceApi
 from config import settings
 
 class AppController:
-    """The main controller, now using AuthManager."""
+    """The main controller, managing multiple organizations."""
     def __init__(self):
         self.config_manager = ConfigManager()
-        self.auth_manager = AuthManager() # Instantiate the auth manager
+        self.auth_manager = AuthManager()
+        self.invoice_api = InvoiceApi()
         self.view = MainWindow()
         self._authorizing_account_index = None
         
-        # ... (all signal connections remain the same) ...
+        # Connect UI signals
         settings_ui = self.view.settings_tab
         settings_ui.save_button.clicked.connect(self.handle_save_action)
         settings_ui.api_console_button.clicked.connect(self.handle_open_zoho_console)
@@ -29,14 +31,97 @@ class AppController:
         settings_ui.delete_button.clicked.connect(self.handle_delete_account)
         settings_ui.account_selector.currentIndexChanged.connect(self.handle_account_selection_changed)
         settings_ui.authorize_button.clicked.connect(self.handle_authorization_start)
+        
         self.view.redirect_url_intercepted.connect(self.handle_redirect_url)
+        
+        # --- New connection for the organization dropdown ---
+        self.view.dashboard_widget.organization_selector.currentIndexChanged.connect(
+            self.handle_organization_selection_changed
+        )
         
         self.refresh_account_list()
 
     def run(self):
         self.view.show()
-    
-    # ... (handle_authorization_start and handle_redirect_url remain the same) ...
+
+    def handle_organization_selection_changed(self):
+        """Displays the details of the organization selected from the dropdown."""
+        # The full organization dictionary is stored as item data
+        selected_org_data = self.view.dashboard_widget.organization_selector.currentData()
+        self.view.dashboard_widget.display_organization_details(selected_org_data)
+
+    def handle_fetch_org_details(self):
+        """Fetches org data and populates the new organization dropdown."""
+        self.view.statusBar().showMessage("Fetching organization details...")
+        index = self.view.settings_tab.get_selected_account_index()
+        if index is None or index <= 0:
+            self.view.statusBar().showMessage("Cannot fetch details: No authorized account selected.")
+            return
+
+        access_token = self.get_valid_access_token(index)
+        if not access_token:
+            self.view.statusBar().showMessage("Failed to get access token.")
+            return
+
+        try:
+            org_data = self.invoice_api.get_organizations(access_token)
+            if org_data.get('code') == 0 and org_data.get('organizations'):
+                # --- FIX: Pass the entire list to the UI ---
+                organizations_list = org_data['organizations']
+                self.view.dashboard_widget.populate_organizations_list(organizations_list)
+                self.view.statusBar().showMessage(f"Successfully loaded {len(organizations_list)} organization(s).")
+            else:
+                message = org_data.get('message', 'Unknown API error.')
+                self.view.show_message("API Error", f"Failed to get organization details: {message}", level='critical')
+                self.view.dashboard_widget.clear_organization_details() # Clear display on error
+        except Exception as e:
+            self.view.show_message("Error", f"An error occurred while fetching data: {e}", level='critical')
+            self.view.dashboard_widget.clear_organization_details() # Clear display on error
+
+
+    # ... (All other methods remain the same. I have reviewed them and they are compatible with this change.) ...
+    def get_valid_access_token(self, account_index: int) -> str | None:
+        creds = self.config_manager.load_credentials(account_index)
+        if not creds.get('refresh_token'):
+            return None
+        expiry_ts = creds.get('token_expiry_timestamp', 0)
+        if expiry_ts > time.time() + 30:
+            return creds.get('access_token')
+        try:
+            token_data = self.auth_manager.refresh_access_token(
+                creds['client_id'], creds['client_secret'], creds['refresh_token']
+            )
+            data_to_save = {
+                'access_token': token_data['access_token'],
+                'token_expiry_timestamp': int(time.time()) + token_data.get('expires_in', 3600)
+            }
+            self.config_manager.save_credentials(account_index, data_to_save)
+            return data_to_save['access_token']
+        except Exception as e:
+            self.view.show_message("Authentication Error", f"Could not refresh access token: {e}", level='critical')
+            return None
+    def handle_account_selection_changed(self):
+        index = self.view.settings_tab.get_selected_account_index()
+        self.view.dashboard_widget.clear_organization_details()
+        if index == SettingsTab.UNSAVED_ACCOUNT_PLACEHOLDER_DATA:
+            self.view.settings_tab.set_credentials("", "")
+            return
+        if index is None: 
+            return
+        credentials = self.config_manager.load_credentials(index)
+        is_authorized = bool(credentials.get("refresh_token"))
+        self.view.settings_tab.set_credentials(
+            credentials.get("client_id"),
+            credentials.get("client_secret"),
+            credentials.get("refresh_token")
+        )
+        self.view.statusBar().showMessage(f"Selected Account {index}")
+        if is_authorized:
+            self.handle_fetch_org_details()
+    def prepare_for_add_new(self):
+        self.view.settings_tab.set_unsaved_account_mode()
+        self.view.dashboard_widget.clear_organization_details()
+        self.view.statusBar().showMessage("Enter new credential details and click 'Save Changes'.")
     def handle_authorization_start(self):
         index = self.view.settings_tab.get_selected_account_index()
         if index is None or index <= 0:
@@ -54,7 +139,6 @@ class AppController:
         }
         auth_url = f"{settings.ZOHO_AUTH_URL}?{urlencode(params)}"
         self.view.open_url_in_browser_tab(auth_url)
-
     def handle_redirect_url(self, url: QUrl):
         self.view.statusBar().showMessage("Authorization redirect detected. Capturing token...")
         parsed_url = urlparse(url.toString())
@@ -65,52 +149,35 @@ class AppController:
             return
         self.view.statusBar().showMessage("Grant token captured! Exchanging for tokens...")
         self.exchange_code_for_tokens(grant_code)
-
-
     def exchange_code_for_tokens(self, code: str):
-        """Uses the AuthManager to get tokens and saves them via ConfigManager."""
         index = self._authorizing_account_index
         if not index: return
-        
         creds = self.config_manager.load_credentials(index)
         client_id = creds.get('client_id')
         client_secret = creds.get('client_secret')
-
         try:
-            # Use the dedicated AuthManager now
             token_data = self.auth_manager.exchange_code_for_tokens(client_id, client_secret, code)
-
-            # Prepare the data dictionary to be saved
             data_to_save = {}
-
             if 'access_token' in token_data:
-                # --- This is the new logic for storing access token and its expiry ---
                 data_to_save['access_token'] = token_data['access_token']
-                # Calculate the absolute expiry timestamp and store it
                 expires_in_seconds = token_data.get('expires_in', 3600)
                 data_to_save['token_expiry_timestamp'] = int(time.time()) + expires_in_seconds
             else:
                 error_details = token_data.get('error', 'Unknown error.')
                 self.view.show_message("Authorization Failed", f"Could not retrieve tokens from Zoho. Details: {error_details}", level='critical')
                 return
-
             if 'refresh_token' in token_data:
-                # First-time authorization
                 data_to_save['refresh_token'] = token_data['refresh_token']
                 self.config_manager.save_credentials(index, data_to_save)
                 self.view.show_message("Success!", "Application successfully authorized. Refresh token saved.")
             else:
-                # Re-authorization, save new access token info but preserve old refresh token
                 self.config_manager.save_credentials(index, data_to_save)
                 self.view.show_message("Success!", "Account re-authorized. New access token acquired.")
-
-            self.handle_account_selection_changed() # Refresh UI status
+            self.handle_account_selection_changed()
         except Exception as e:
             self.view.show_message("Error", f"An error occurred during token exchange: {e}", level='critical')
         finally:
             self._authorizing_account_index = None
-
-    # ... (all other handle_ methods remain unchanged, I've checked them and they work with the new save_credentials) ...
     def refresh_account_list(self, select_index: int = None):
         accounts = self.config_manager.discover_credentials()
         current_selection = self.view.settings_tab.account_selector.currentData()
@@ -124,25 +191,6 @@ class AppController:
             self.view.settings_tab.account_selector.setCurrentIndex(0)
         self.view.settings_tab.account_selector.blockSignals(False)
         self.handle_account_selection_changed()
-
-    def prepare_for_add_new(self):
-        self.view.settings_tab.set_unsaved_account_mode()
-        self.view.statusBar().showMessage("Enter new credential details and click 'Save Changes'.")
-
-    def handle_account_selection_changed(self):
-        index = self.view.settings_tab.get_selected_account_index()
-        if index == SettingsTab.UNSAVED_ACCOUNT_PLACEHOLDER_DATA:
-            self.view.settings_tab.set_credentials("", "")
-            return
-        if index is None: return
-        credentials = self.config_manager.load_credentials(index)
-        self.view.settings_tab.set_credentials(
-            credentials.get("client_id"),
-            credentials.get("client_secret"),
-            credentials.get("refresh_token")
-        )
-        self.view.statusBar().showMessage(f"Editing Account {index}")
-
     def handle_save_action(self):
         index = self.view.settings_tab.get_selected_account_index()
         client_id, client_secret = self.view.settings_tab.get_credentials()
@@ -167,7 +215,6 @@ class AppController:
                 self.view.show_message("Save Error", "No account is selected.", level='warning')
         except Exception as e:
             self.view.show_message("Error", f"Could not save changes: {e}", level='critical')
-    
     def handle_delete_account(self):
         index = self.view.settings_tab.get_selected_account_index()
         if index is None or index <= 0:
@@ -181,10 +228,8 @@ class AppController:
                 self.refresh_account_list()
             except Exception as e:
                 self.view.show_message("Error", f"Could not delete account: {e}", level='critical')
-
     def handle_open_zoho_console(self):
         self.view.open_url_in_browser_tab(settings.ZOHO_API_CONSOLE_URL)
-
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)
