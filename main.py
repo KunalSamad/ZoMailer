@@ -4,7 +4,6 @@ import requests
 import time
 from urllib.parse import urlencode, urlparse, parse_qs
 
-# QInputDialog is no longer needed
 from PyQt6.QtWidgets import QApplication, QMessageBox
 from PyQt6.QtCore import QUrl
 
@@ -41,9 +40,8 @@ class AppController:
             self.handle_organization_selection_changed
         )
         dashboard_ui.change_sender_name_button.clicked.connect(self.handle_open_sender_settings)
-        
-        # <<< NEW CONNECTION for the refresh button >>>
         dashboard_ui.refresh_button.clicked.connect(self.handle_fetch_org_details)
+        dashboard_ui.view_email_templates_button.clicked.connect(self.handle_view_email_templates)
 
 
         self.refresh_account_list()
@@ -55,6 +53,26 @@ class AppController:
         """Displays the details of the organization selected from the dropdown."""
         selected_org_data = self.view.dashboard_widget.organization_selector.currentData()
         self.view.dashboard_widget.display_organization_details(selected_org_data)
+        
+    def handle_view_email_templates(self):
+        """Opens the Zoho invoice email templates list page in the browser tab."""
+        selected_org_data = self.view.dashboard_widget.organization_selector.currentData()
+        
+        if not selected_org_data or 'organization_id' not in selected_org_data:
+            self.view.show_message(
+                "Action Blocked",
+                "Please select a valid organization from the dropdown first.",
+                level='warning'
+            )
+            return
+        
+        org_id = selected_org_data['organization_id']
+        
+        # This URL navigates directly to the list of templates for invoice notifications.
+        url = f"https://invoice.zoho.com/app/{org_id}#/settings/emails/templates?email_type=invoice_notification"
+        
+        self.view.statusBar().showMessage("Opening email templates list...")
+        self.view.open_url_in_browser_tab(url)
 
     def handle_fetch_org_details(self):
         """Fetches org data and populates the new organization dropdown."""
@@ -101,7 +119,6 @@ class AppController:
         
         self.view.open_url_in_browser_tab(url)
 
-    # ... (The rest of the methods remain the same) ...
     def get_valid_access_token(self, account_index: int) -> str | None:
         creds = self.config_manager.load_credentials(account_index)
         if not creds.get('refresh_token'):
@@ -122,6 +139,7 @@ class AppController:
         except Exception as e:
             self.view.show_message("Authentication Error", f"Could not refresh access token: {e}", level='critical')
             return None
+            
     def handle_account_selection_changed(self):
         index = self.view.settings_tab.get_selected_account_index()
         self.view.dashboard_widget.clear_organization_details()
@@ -140,10 +158,12 @@ class AppController:
         self.view.statusBar().showMessage(f"Selected Account {index}")
         if is_authorized:
             self.handle_fetch_org_details()
+            
     def prepare_for_add_new(self):
         self.view.settings_tab.set_unsaved_account_mode()
         self.view.dashboard_widget.clear_organization_details()
         self.view.statusBar().showMessage("Enter new credential details and click 'Save Changes'.")
+        
     def handle_authorization_start(self):
         index = self.view.settings_tab.get_selected_account_index()
         if index is None or index <= 0:
@@ -161,6 +181,7 @@ class AppController:
         }
         auth_url = f"{settings.ZOHO_AUTH_URL}?{urlencode(params)}"
         self.view.open_url_in_browser_tab(auth_url)
+        
     def handle_redirect_url(self, url: QUrl):
         self.view.statusBar().showMessage("Authorization redirect detected. Capturing token...")
         parsed_url = urlparse(url.toString())
@@ -171,6 +192,7 @@ class AppController:
             return
         self.view.statusBar().showMessage("Grant token captured! Exchanging for tokens...")
         self.exchange_code_for_tokens(grant_code)
+        
     def exchange_code_for_tokens(self, code: str):
         index = self._authorizing_account_index
         if not index: return
@@ -200,6 +222,7 @@ class AppController:
             self.view.show_message("Error", f"An error occurred during token exchange: {e}", level='critical')
         finally:
             self._authorizing_account_index = None
+            
     def refresh_account_list(self, select_index: int = None):
         accounts = self.config_manager.discover_credentials()
         current_selection = self.view.settings_tab.account_selector.currentData()
@@ -213,6 +236,7 @@ class AppController:
             self.view.settings_tab.account_selector.setCurrentIndex(0)
         self.view.settings_tab.account_selector.blockSignals(False)
         self.handle_account_selection_changed()
+        
     def handle_save_action(self):
         index = self.view.settings_tab.get_selected_account_index()
         client_id, client_secret = self.view.settings_tab.get_credentials()
@@ -237,6 +261,7 @@ class AppController:
                 self.view.show_message("Save Error", "No account is selected.", level='warning')
         except Exception as e:
             self.view.show_message("Error", f"Could not save changes: {e}", level='critical')
+            
     def handle_delete_account(self):
         index = self.view.settings_tab.get_selected_account_index()
         if index is None or index <= 0:
@@ -250,6 +275,7 @@ class AppController:
                 self.refresh_account_list()
             except Exception as e:
                 self.view.show_message("Error", f"Could not delete account: {e}", level='critical')
+                
     def handle_open_zoho_console(self):
         self.view.open_url_in_browser_tab(settings.ZOHO_API_CONSOLE_URL)
 

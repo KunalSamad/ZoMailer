@@ -31,5 +31,3 @@ class InvoiceApi:
             return response.json()
         except requests.exceptions.RequestException as e:
             raise ConnectionError(f"Failed to fetch organizations: {e}") from e
-
-    # <<< The update_organization_details method has been removed >>>
