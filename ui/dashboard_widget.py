@@ -1,9 +1,10 @@
 # ui/dashboard_widget.py
-# The main widget for the Dashboard tab, now with organization selection.
+# The main widget for the Dashboard tab, now with an "Add Item" form.
 
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QTabWidget, QLabel, QPushButton, 
-                             QFormLayout, QHBoxLayout, QComboBox)
+                             QFormLayout, QHBoxLayout, QComboBox, QLineEdit, QTextEdit)
 from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QDoubleValidator
 
 class DashboardWidget(QWidget):
     """A widget that contains the dashboard's sub-tabs."""
@@ -14,9 +15,50 @@ class DashboardWidget(QWidget):
         self.sub_tabs = QTabWidget()
         main_layout.addWidget(self.sub_tabs)
         
-        # Create and add the first sub-tab
+        # Create and add the sub-tabs
         self.account_details_tab = self._create_account_details_tab()
         self.sub_tabs.addTab(self.account_details_tab, "Account Details")
+        
+        # <<< CREATE AND ADD THE NEW "ADD ITEM" TAB >>>
+        self.add_item_tab = self._create_add_item_tab()
+        self.sub_tabs.addTab(self.add_item_tab, "Add Item")
+
+    def _create_add_item_tab(self):
+        """Creates the UI for the 'Add Item' sub-tab."""
+        tab_widget = QWidget()
+        layout = QVBoxLayout(tab_widget)
+        layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+        layout.setSpacing(15)
+
+        form_layout = QFormLayout()
+        
+        self.item_name_input = QLineEdit()
+        self.item_name_input.setPlaceholderText("e.g., Web Design Services")
+        
+        self.item_rate_input = QLineEdit()
+        self.item_rate_input.setValidator(QDoubleValidator(0.00, 9999999.99, 2))
+        self.item_rate_input.setPlaceholderText("e.g., 150.00")
+
+        self.item_description_input = QTextEdit()
+        self.item_description_input.setPlaceholderText("A detailed description of the service or product.")
+        self.item_description_input.setFixedHeight(100)
+        
+        form_layout.addRow("<b>Item Name:*</b>", self.item_name_input)
+        form_layout.addRow("<b>Rate:*</b>", self.item_rate_input)
+        form_layout.addRow("<b>Description:</b>", self.item_description_input)
+
+        self.add_item_button = QPushButton("Add Item")
+        self.add_item_button.setFixedWidth(120)
+        self.add_item_button.setStyleSheet("background-color: #28a745; color: white; padding: 10px;")
+
+        buttons_layout = QHBoxLayout()
+        buttons_layout.addStretch()
+        buttons_layout.addWidget(self.add_item_button)
+
+        layout.addLayout(form_layout)
+        layout.addLayout(buttons_layout)
+        
+        return tab_widget
 
     def _create_account_details_tab(self):
         """Creates the UI for the 'Account Details' sub-tab."""
@@ -25,7 +67,6 @@ class DashboardWidget(QWidget):
         layout.setAlignment(Qt.AlignmentFlag.AlignTop)
         layout.setSpacing(15)
         
-        # --- Organization Selection and Refresh Layout ---
         org_selection_layout = QHBoxLayout()
         org_selection_layout.addWidget(QLabel("<b>Select Organization:</b>"))
         self.organization_selector = QComboBox()
@@ -39,12 +80,10 @@ class DashboardWidget(QWidget):
         org_selection_layout.addStretch()
         layout.addLayout(org_selection_layout)
 
-        # Details layout for displaying information
         details_layout = QFormLayout()
         details_layout.setSpacing(10)
         details_layout.setContentsMargins(0, 10, 0, 0)
         
-        # --- Labels to display organization details ---
         self.org_id_label = QLabel("...") 
         self.org_name_label = QLabel("...")
         self.contact_name_label = QLabel("...")
@@ -52,7 +91,6 @@ class DashboardWidget(QWidget):
         self.country_label = QLabel("...")
         self.currency_code_label = QLabel("...")
         
-        # --- Buttons for contextual actions ---
         self.change_sender_name_button = QPushButton("Change Sender Name") 
         self.change_sender_name_button.setFixedWidth(160) 
 
@@ -70,7 +108,6 @@ class DashboardWidget(QWidget):
         template_actions_layout.addWidget(self.view_email_templates_button)
         template_actions_layout.addStretch()
 
-        # --- Add rows to the form layout ---
         details_layout.addRow("Organization ID:", self.org_id_label)
         details_layout.addRow("Organization Name:", self.org_name_label)
         details_layout.addRow("Primary Contact:", contact_layout) 
@@ -96,7 +133,6 @@ class DashboardWidget(QWidget):
         self.organization_selector.blockSignals(False)
         if self.organization_selector.count() > 0:
             self.organization_selector.currentIndexChanged.emit(0)
-
 
     def display_organization_details(self, details: dict | None):
         """Populates the labels with data from a single organization dictionary."""
@@ -127,3 +163,9 @@ class DashboardWidget(QWidget):
         self.organization_selector.clear()
         self.organization_selector.addItem("N/A", None)
         self.organization_selector.blockSignals(False)
+
+    def clear_add_item_form(self):
+        """Clears all input fields in the 'Add Item' form."""
+        self.item_name_input.clear()
+        self.item_rate_input.clear()
+        self.item_description_input.clear()

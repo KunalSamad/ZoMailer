@@ -40,14 +40,79 @@ class AppController:
             self.handle_organization_selection_changed
         )
         dashboard_ui.change_sender_name_button.clicked.connect(self.handle_open_sender_settings)
-        dashboard_ui.refresh_button.clicked.connect(self.handle_fetch_org_details)
         dashboard_ui.view_email_templates_button.clicked.connect(self.handle_view_email_templates)
-
+        dashboard_ui.refresh_button.clicked.connect(self.handle_fetch_org_details)
+        dashboard_ui.add_item_button.clicked.connect(self.handle_add_item)
 
         self.refresh_account_list()
 
     def run(self):
         self.view.show()
+
+    # <<< MODIFIED to pass the organization_id to the API call >>>
+    def handle_add_item(self):
+        """Handles the logic for the 'Add Item' button click."""
+        dashboard_ui = self.view.dashboard_widget
+        
+        # 1. Get data from the form
+        item_name = dashboard_ui.item_name_input.text().strip()
+        rate_str = dashboard_ui.item_rate_input.text().strip()
+        description = dashboard_ui.item_description_input.toPlainText().strip()
+
+        # 2. Validate the data
+        if not item_name or not rate_str:
+            self.view.show_message("Input Error", "Item Name and Rate are required.", level='warning')
+            return
+        
+        try:
+            rate = float(rate_str)
+        except ValueError:
+            self.view.show_message("Input Error", "Rate must be a valid number.", level='warning')
+            return
+
+        # 3. Get the currently selected organization ID
+        selected_org_data = dashboard_ui.organization_selector.currentData()
+        if not selected_org_data or 'organization_id' not in selected_org_data:
+            self.view.show_message("Error", "Please select a valid organization from the 'Account Details' tab first.", level='critical')
+            return
+        organization_id = selected_org_data['organization_id']
+
+        # 4. Get a valid access token
+        self.view.statusBar().showMessage("Authenticating...")
+        account_index = self.view.settings_tab.get_selected_account_index()
+        if account_index is None:
+             self.view.show_message("Error", "Please select a valid account first.", level='critical')
+             self.view.statusBar().showMessage("Ready")
+             return
+             
+        access_token = self.get_valid_access_token(account_index)
+        if not access_token:
+            self.view.show_message("Authentication Error", "Could not get a valid access token.", level='critical')
+            self.view.statusBar().showMessage("Ready")
+            return
+
+        # 5. Construct payload and call API
+        self.view.statusBar().showMessage(f"Adding item '{item_name}'...")
+        item_payload = {
+            "name": item_name,
+            "rate": rate,
+            "description": description
+        }
+
+        try:
+            # Pass the organization_id along with the other data
+            response = self.invoice_api.create_item(access_token, organization_id, item_payload)
+            
+            if response.get('code') == 0:
+                self.view.show_message("Success", f"Item '{item_name}' was added successfully.")
+                dashboard_ui.clear_add_item_form()
+            else:
+                message = response.get('message', 'An unknown API error occurred.')
+                self.view.show_message("API Error", f"Could not add item: {message}", level='critical')
+        except Exception as e:
+            self.view.show_message("Error", f"An unexpected error occurred: {e}", level='critical')
+        finally:
+            self.view.statusBar().showMessage("Ready")
 
     def handle_organization_selection_changed(self):
         """Displays the details of the organization selected from the dropdown."""
@@ -59,16 +124,10 @@ class AppController:
         selected_org_data = self.view.dashboard_widget.organization_selector.currentData()
         
         if not selected_org_data or 'organization_id' not in selected_org_data:
-            self.view.show_message(
-                "Action Blocked",
-                "Please select a valid organization from the dropdown first.",
-                level='warning'
-            )
+            self.view.show_message("Action Blocked", "Please select a valid organization from the dropdown first.", level='warning')
             return
         
         org_id = selected_org_data['organization_id']
-        
-        # This URL navigates directly to the list of templates for invoice notifications.
         url = f"https://invoice.zoho.com/app/{org_id}#/settings/emails/templates?email_type=invoice_notification"
         
         self.view.statusBar().showMessage("Opening email templates list...")
@@ -106,15 +165,10 @@ class AppController:
         selected_org_data = self.view.dashboard_widget.organization_selector.currentData()
         
         if not selected_org_data or 'organization_id' not in selected_org_data:
-            self.view.show_message(
-                "Action Blocked",
-                "Please select a valid organization from the dropdown first.",
-                level='warning'
-            )
+            self.view.show_message("Action Blocked","Please select a valid organization from the dropdown first.", level='warning')
             return
         
         org_id = selected_org_data['organization_id']
-        # Construct the URL dynamically for the selected organization
         url = f"https://invoice.zoho.com/app/{org_id}#/settings/emails/preference"
         
         self.view.open_url_in_browser_tab(url)
