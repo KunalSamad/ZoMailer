@@ -1,12 +1,12 @@
 # core/config_manager.py
-# Manages multiple credential files in the 'credentials' directory.
+# Manages multiple account files, now named account_N.json.
 
 import json
 import os
 from pathlib import Path
 
 class ConfigManager:
-    """Manages multiple credential files (credentials_1.json, etc.)."""
+    """Manages multiple account files (account_1.json, etc.)."""
 
     def __init__(self):
         project_root = Path(__file__).parent.parent
@@ -15,12 +15,13 @@ class ConfigManager:
 
     def discover_credentials(self) -> dict[int, str]:
         """
-        Scans the credentials directory and returns a dictionary
-        mapping the account index to its display name.
+        Scans the credentials directory for files named 'account_N.json'.
         """
         accounts = {}
-        for filename in self.credentials_dir.glob('credentials_*.json'):
+        # Changed 'credentials_*.json' to 'account_*.json'
+        for filename in self.credentials_dir.glob('account_*.json'):
             try:
+                # The parsing logic remains the same
                 index = int(filename.stem.split('_')[1])
                 accounts[index] = f"Account {index}"
             except (ValueError, IndexError):
@@ -28,40 +29,38 @@ class ConfigManager:
         return accounts
 
     def load_credentials(self, index: int) -> dict:
-        """Loads a specific credential file by its index."""
-        filepath = self.credentials_dir / f'credentials_{index}.json'
+        """Loads a specific account file by its index."""
+        # Changed 'credentials_' to 'account_'
+        filepath = self.credentials_dir / f'account_{index}.json'
         if not filepath.exists():
-            return {"client_id": "", "client_secret": ""}
+            return {}
         try:
             with open(filepath, 'r') as f:
-                data = json.load(f)
-                data.setdefault("client_id", "")
-                data.setdefault("client_secret", "")
-                return data
+                return json.load(f)
         except (json.JSONDecodeError, IOError):
-            return {"client_id": "", "client_secret": ""}
+            return {}
 
-    def save_credentials(self, index: int, client_id: str, client_secret: str):
-        """Saves (updates) a specific credential file by its index."""
-        filepath = self.credentials_dir / f'credentials_{index}.json'
-        data_to_save = {"client_id": client_id, "client_secret": client_secret}
+    def save_credentials(self, index: int, data: dict):
+        """Saves a dictionary of data to a specific account file."""
+        # Changed 'credentials_' to 'account_'
+        filepath = self.credentials_dir / f'account_{index}.json'
+        existing_data = self.load_credentials(index)
+        existing_data.update(data)
+            
         with open(filepath, 'w') as f:
-            json.dump(data_to_save, f, indent=4)
+            json.dump(existing_data, f, indent=4)
 
     def add_new_credentials(self, client_id: str, client_secret: str) -> int:
-        """
-        Finds the next available index and creates a new credential file
-        with the provided data. Returns the new index.
-        """
+        """Adds a new account file."""
         existing_accounts = self.discover_credentials()
         new_index = max(existing_accounts.keys()) + 1 if existing_accounts else 1
-        # Call the existing save method to create the file with data
-        self.save_credentials(new_index, client_id, client_secret)
+        self.save_credentials(new_index, {"client_id": client_id, "client_secret": client_secret})
         return new_index
 
     def delete_credentials(self, index: int):
-        """Deletes a specific credential file."""
-        filepath = self.credentials_dir / f'credentials_{index}.json'
+        """Deletes a specific account file."""
+        # Changed 'credentials_' to 'account_'
+        filepath = self.credentials_dir / f'account_{index}.json'
         try:
             if filepath.exists():
                 os.remove(filepath)

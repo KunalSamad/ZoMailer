@@ -1,11 +1,8 @@
 # ui/settings_tab.py
-# Redesigned UI for multi-account management.
-
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QLabel, QLineEdit, QPushButton, 
                              QFormLayout, QHBoxLayout, QComboBox, QFrame)
 
 class SettingsTab(QWidget):
-    """UI for managing multiple credential accounts."""
     UNSAVED_ACCOUNT_PLACEHOLDER_TEXT = "--- New Account (Unsaved) ---"
     UNSAVED_ACCOUNT_PLACEHOLDER_DATA = -1
 
@@ -33,7 +30,6 @@ class SettingsTab(QWidget):
         selection_layout.addStretch()
         main_layout.addLayout(selection_layout)
         
-        # Separator line
         separator = QFrame()
         separator.setFrameShape(QFrame.Shape.HLine)
         separator.setFrameShadow(QFrame.Shadow.Sunken)
@@ -43,21 +39,30 @@ class SettingsTab(QWidget):
         details_layout = QFormLayout()
         details_layout.setSpacing(10)
         self.client_id_input = QLineEdit()
-        self.client_id_input.setPlaceholderText("Enter Client ID for the selected account")
         self.client_secret_input = QLineEdit()
         self.client_secret_input.setEchoMode(QLineEdit.EchoMode.Password)
-        self.client_secret_input.setPlaceholderText("Enter Client Secret")
         details_layout.addRow("Client ID:", self.client_id_input)
         details_layout.addRow("Client Secret:", self.client_secret_input)
+
+        # --- New Authorization Status Label ---
+        self.auth_status_label = QLabel("Status: Unknown")
+        self.auth_status_label.setStyleSheet("font-weight: bold;")
+        details_layout.addRow("Authorization Status:", self.auth_status_label)
         main_layout.addLayout(details_layout)
 
         # Action Buttons Section
         action_layout = QHBoxLayout()
         self.save_button = QPushButton("Save Changes")
         self.save_button.setStyleSheet("background-color: #007BFF; color: white; padding: 10px;")
+        
+        # --- New Authorize Button ---
+        self.authorize_button = QPushButton("Authorize This Account")
+        self.authorize_button.setStyleSheet("background-color: #28a745; color: white; padding: 10px;")
+        
         self.api_console_button = QPushButton("Go to Zoho API Console")
-        self.api_console_button.setStyleSheet("background-color: #6c757d; color: white; padding: 10px;")
+        
         action_layout.addWidget(self.save_button)
+        action_layout.addWidget(self.authorize_button)
         action_layout.addWidget(self.api_console_button)
         action_layout.addStretch()
         main_layout.addLayout(action_layout)
@@ -66,12 +71,17 @@ class SettingsTab(QWidget):
     def get_credentials(self) -> tuple[str, str]:
         return self.client_id_input.text().strip(), self.client_secret_input.text().strip()
 
-    def set_credentials(self, client_id: str, client_secret: str):
+    def set_credentials(self, client_id: str, client_secret: str, refresh_token: str = None):
         self.client_id_input.setText(client_id or "")
         self.client_secret_input.setText(client_secret or "")
-    
+        if refresh_token:
+            self.auth_status_label.setText("Status: Authorized")
+            self.auth_status_label.setStyleSheet("font-weight: bold; color: green;")
+        else:
+            self.auth_status_label.setText("Status: Not Authorized")
+            self.auth_status_label.setStyleSheet("font-weight: bold; color: red;")
+            
     def populate_account_list(self, accounts: dict[int, str]):
-        """Populates the dropdown with real accounts from the file system."""
         self.account_selector.clear()
         if not accounts:
             self.account_selector.addItem("No accounts exist", self.UNSAVED_ACCOUNT_PLACEHOLDER_DATA)
@@ -83,20 +93,11 @@ class SettingsTab(QWidget):
         return self.account_selector.currentData()
 
     def set_unsaved_account_mode(self):
-        """Adds and selects the temporary placeholder for a new, unsaved account."""
-        # --- FIX STARTS HERE ---
         placeholder_index = self.account_selector.findData(self.UNSAVED_ACCOUNT_PLACEHOLDER_DATA)
-        
         if placeholder_index != -1:
-            # An item with the special placeholder ID already exists.
-            # This could be "No accounts exist" or the placeholder itself.
-            # We must ENSURE its text is correct and then select it.
             self.account_selector.setItemText(placeholder_index, self.UNSAVED_ACCOUNT_PLACEHOLDER_TEXT)
             self.account_selector.setCurrentIndex(placeholder_index)
         else:
-            # No placeholder exists, so we are adding it fresh.
             self.account_selector.insertItem(0, self.UNSAVED_ACCOUNT_PLACEHOLDER_TEXT, self.UNSAVED_ACCOUNT_PLACEHOLDER_DATA)
             self.account_selector.setCurrentIndex(0)
-        # --- FIX ENDS HERE ---
-        
         self.set_credentials("", "")
