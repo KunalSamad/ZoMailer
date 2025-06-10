@@ -36,47 +36,91 @@ class AppController:
         
         # Connect Dashboard signals
         dashboard_ui = self.view.dashboard_widget
-        dashboard_ui.organization_selector.currentIndexChanged.connect(
-            self.handle_organization_selection_changed
-        )
+        dashboard_ui.organization_selector.currentIndexChanged.connect(self.handle_organization_selection_changed)
         dashboard_ui.change_sender_name_button.clicked.connect(self.handle_open_sender_settings)
         dashboard_ui.view_email_templates_button.clicked.connect(self.handle_view_email_templates)
         dashboard_ui.refresh_button.clicked.connect(self.handle_refresh_all)
+        # Items Tab
         dashboard_ui.add_item_button.clicked.connect(self.handle_add_item)
         dashboard_ui.refresh_items_button.clicked.connect(self.handle_fetch_items)
+        # Customers Tab
         dashboard_ui.add_customer_row_button.clicked.connect(self.handle_add_customer_row)
         dashboard_ui.remove_customer_row_button.clicked.connect(self.handle_remove_customer_row)
         dashboard_ui.submit_customers_button.clicked.connect(self.handle_submit_customers)
-
-        # <<< NEW CONNECTION for the refresh customers button >>>
         dashboard_ui.refresh_customers_button.clicked.connect(self.handle_fetch_customers)
+        # <<< NEW CONNECTIONS for the invoice form >>>
+        dashboard_ui.add_invoice_line_button.clicked.connect(self.handle_add_invoice_line)
+        dashboard_ui.remove_invoice_line_button.clicked.connect(self.handle_remove_invoice_line)
+        dashboard_ui.create_invoice_button.clicked.connect(self.handle_create_invoice)
 
         self.refresh_account_list()
 
-    # <<< NEW METHOD to fetch and display customers >>>
-    def handle_fetch_customers(self):
-        """Fetches the customer list for the selected org and populates the table."""
-        self.view.statusBar().showMessage("Fetching customers...")
+    # <<< NEW METHODS to handle the invoice creation process >>>
+    def handle_add_invoice_line(self):
+        """Tells the view to add a new row to the invoice line items table."""
+        self.view.dashboard_widget.add_invoice_line_row()
 
+    def handle_remove_invoice_line(self):
+        """Tells the view to remove the selected row from the invoice line items table."""
+        self.view.dashboard_widget.remove_selected_invoice_line()
+
+    def handle_create_invoice(self):
+        """Gathers data from the form and calls the API to create an invoice."""
+        self.view.statusBar().showMessage("Validating invoice...")
+        
+        # 1. Get and validate data from the form
+        invoice_data, error_msg = self.view.dashboard_widget.get_invoice_data()
+        if error_msg:
+            self.view.show_message("Validation Error", error_msg, level='warning')
+            return
+
+        # 2. Get authentication details
+        organization_id = self.view.dashboard_widget.organization_selector.currentData()['organization_id']
+        account_index = self.view.settings_tab.get_selected_account_index()
+        access_token = self.get_valid_access_token(account_index)
+        if not access_token:
+            self.view.show_message("Authentication Error", "Could not get a valid access token.", level='critical')
+            return
+
+        # 3. Call API to create invoice
+        self.view.statusBar().showMessage("Creating invoice...")
+        try:
+            response = self.invoice_api.create_invoice(access_token, organization_id, invoice_data)
+            if response.get('code') == 0:
+                invoice_id = response['invoice']['invoice_id']
+                self.view.show_message("Success", f"Successfully created invoice with ID: {invoice_id}")
+                self.view.dashboard_widget.clear_invoice_form()
+            else:
+                message = response.get('message', 'An unknown API error occurred.')
+                self.view.show_message("API Error", f"Could not create invoice: {message}", level='critical')
+        except Exception as e:
+            self.view.show_message("Error", f"An unexpected error occurred: {e}", level='critical')
+        finally:
+            self.view.statusBar().showMessage("Ready")
+
+
+    def handle_fetch_customers(self):
+        """Fetches the customer list and populates both customer tables/dropdowns."""
+        self.view.statusBar().showMessage("Fetching customers...")
         selected_org_data = self.view.dashboard_widget.organization_selector.currentData()
         if not selected_org_data or 'organization_id' not in selected_org_data:
             self.view.statusBar().showMessage("Select an organization to view customers.")
             self.view.dashboard_widget.populate_customers_table([])
+            self.view.dashboard_widget.populate_invoice_customer_dropdown([])
             return
         organization_id = selected_org_data['organization_id']
-
         account_index = self.view.settings_tab.get_selected_account_index()
         access_token = self.get_valid_access_token(account_index)
         if not access_token:
             self.view.show_message("Authentication Error", "Could not get access token to fetch customers.", level='critical')
             self.view.statusBar().showMessage("Ready")
             return
-
         try:
             response = self.invoice_api.get_customers(access_token, organization_id)
             if response.get('code') == 0:
                 customers_list = response.get('contacts', [])
                 self.view.dashboard_widget.populate_customers_table(customers_list)
+                self.view.dashboard_widget.populate_invoice_customer_dropdown(customers_list) # Populate invoice form too
                 self.view.statusBar().showMessage(f"Successfully fetched {len(customers_list)} customer(s).")
             else:
                 message = response.get('message', 'An unknown API error occurred.')
@@ -85,8 +129,38 @@ class AppController:
             self.view.show_message("Error", f"An unexpected error occurred while fetching customers: {e}", level='critical')
         finally:
             self.view.statusBar().showMessage("Ready")
+            
+    def handle_fetch_items(self):
+        """Fetches the item list and populates the items table and invoice form."""
+        self.view.statusBar().showMessage("Fetching items...")
+        selected_org_data = self.view.dashboard_widget.organization_selector.currentData()
+        if not selected_org_data or 'organization_id' not in selected_org_data:
+            self.view.statusBar().showMessage("Select an organization to view items.")
+            self.view.dashboard_widget.populate_items_table([])
+            return
+        organization_id = selected_org_data['organization_id']
+        account_index = self.view.settings_tab.get_selected_account_index()
+        access_token = self.get_valid_access_token(account_index)
+        if not access_token:
+            self.view.show_message("Authentication Error", "Could not get access token to fetch items.", level='critical')
+            self.view.statusBar().showMessage("Ready")
+            return
+        try:
+            response = self.invoice_api.get_items(access_token, organization_id)
+            if response.get('code') == 0:
+                items_list = response.get('items', [])
+                self.view.dashboard_widget.populate_items_table(items_list)
+                self.view.dashboard_widget.store_item_list(items_list) # Store for invoice form
+                self.view.statusBar().showMessage(f"Successfully fetched {len(items_list)} item(s).")
+            else:
+                message = response.get('message', 'An unknown API error occurred.')
+                self.view.show_message("API Error", f"Could not fetch items: {message}", level='critical')
+        except Exception as e:
+            self.view.show_message("Error", f"An unexpected error occurred while fetching items: {e}", level='critical')
+        finally:
+            self.view.statusBar().showMessage("Ready")
 
-
+    # ... (all other methods from the previous step remain the same) ...
     def handle_add_customer_row(self):
         """Tells the view to add a new row to the customer input table."""
         self.view.dashboard_widget.add_customer_input_row()
@@ -167,38 +241,6 @@ class AppController:
         self.handle_fetch_items()
         self.handle_fetch_customers()
 
-    def handle_fetch_items(self):
-        """Fetches the item list for the selected organization and populates the table."""
-        self.view.statusBar().showMessage("Fetching items...")
-        
-        selected_org_data = self.view.dashboard_widget.organization_selector.currentData()
-        if not selected_org_data or 'organization_id' not in selected_org_data:
-            self.view.statusBar().showMessage("Select an organization to view items.")
-            self.view.dashboard_widget.populate_items_table([])
-            return
-        organization_id = selected_org_data['organization_id']
-
-        account_index = self.view.settings_tab.get_selected_account_index()
-        access_token = self.get_valid_access_token(account_index)
-        if not access_token:
-            self.view.show_message("Authentication Error", "Could not get access token to fetch items.", level='critical')
-            self.view.statusBar().showMessage("Ready")
-            return
-
-        try:
-            response = self.invoice_api.get_items(access_token, organization_id)
-            if response.get('code') == 0:
-                items_list = response.get('items', [])
-                self.view.dashboard_widget.populate_items_table(items_list)
-                self.view.statusBar().showMessage(f"Successfully fetched {len(items_list)} item(s).")
-            else:
-                message = response.get('message', 'An unknown API error occurred.')
-                self.view.show_message("API Error", f"Could not fetch items: {message}", level='critical')
-        except Exception as e:
-            self.view.show_message("Error", f"An unexpected error occurred while fetching items: {e}", level='critical')
-        finally:
-            self.view.statusBar().showMessage("Ready")
-
     def handle_add_item(self):
         """Handles the logic for the 'Add Item' button click."""
         dashboard_ui = self.view.dashboard_widget
@@ -252,7 +294,6 @@ class AppController:
         finally:
             self.view.statusBar().showMessage("Ready")
 
-    # <<< MODIFIED to also fetch customers when the organization changes >>>
     def handle_organization_selection_changed(self):
         """Displays org details and fetches items/customers for the selected org."""
         selected_org_data = self.view.dashboard_widget.organization_selector.currentData()

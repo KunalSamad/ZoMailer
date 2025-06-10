@@ -61,11 +61,8 @@ class InvoiceApi:
                 message = str(e)
             raise ConnectionError(f"Failed to create item: {message}") from e
             
-    # <<< NEW METHOD to get the list of customers (contacts) >>>
     def get_customers(self, access_token: str, organization_id: str) -> dict:
-        """
-        Fetches the list of contacts (customers) for a specific organization.
-        """
+        """Fetches the list of contacts (customers) for a specific organization."""
         headers = self._get_auth_headers(access_token)
         endpoint = f"{self.base_url}/contacts?organization_id={organization_id}"
 
@@ -88,3 +85,19 @@ class InvoiceApi:
             return response.json()
         except requests.exceptions.RequestException as e:
             raise ConnectionError(f"Network error creating customer: {e}") from e
+
+    # <<< NEW METHOD to create an invoice >>>
+    def create_invoice(self, access_token: str, organization_id: str, invoice_data: dict) -> dict:
+        """
+        Creates a new invoice.
+        """
+        headers = self._get_auth_headers(access_token)
+        endpoint = f"{self.base_url}/invoices?organization_id={organization_id}"
+        
+        payload = invoice_data.copy()
+        
+        try:
+            response = requests.post(endpoint, headers=headers, json=payload)
+            return response.json()
+        except requests.exceptions.RequestException as e:
+            raise ConnectionError(f"Network error creating invoice: {e}") from e

@@ -3,8 +3,9 @@
 
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QTabWidget, QLabel, QPushButton, 
                              QFormLayout, QHBoxLayout, QComboBox, QLineEdit, QTextEdit,
-                             QTableWidget, QTableWidgetItem, QHeaderView, QGroupBox)
-from PyQt6.QtCore import Qt
+                             QTableWidget, QTableWidgetItem, QHeaderView, QGroupBox,
+                             QDateEdit, QSpinBox)
+from PyQt6.QtCore import Qt, QDate
 from PyQt6.QtGui import QDoubleValidator
 
 class DashboardWidget(QWidget):
@@ -26,43 +27,101 @@ class DashboardWidget(QWidget):
         self.customers_tab = self._create_customers_tab()
         self.sub_tabs.addTab(self.customers_tab, "Customers")
 
+        # <<< CREATE AND ADD THE NEW "INVOICE" TAB >>>
+        self.invoice_tab = self._create_invoice_tab()
+        self.sub_tabs.addTab(self.invoice_tab, "Invoice")
+
+        # Store item data for populating combos
+        self._item_list_data = []
+
+    # <<< NEW METHOD for the main "Invoice" tab >>>
+    def _create_invoice_tab(self):
+        """Creates the main 'Invoice' container tab."""
+        invoice_main_tabs = QTabWidget()
+        create_invoice_sub_tab = self._create_create_invoice_sub_tab()
+        invoice_main_tabs.addTab(create_invoice_sub_tab, "Create Invoice")
+        return invoice_main_tabs
+
+    # <<< NEW HELPER for the "Create Invoice" sub-tab form >>>
+    def _create_create_invoice_sub_tab(self):
+        """Creates the UI for the 'Create Invoice' sub-tab."""
+        sub_tab_widget = QWidget()
+        main_layout = QVBoxLayout(sub_tab_widget)
+        main_layout.setSpacing(15)
+
+        # Section 1: Customer and Dates
+        top_groupbox = QGroupBox("Invoice Details")
+        top_layout = QFormLayout(top_groupbox)
+
+        self.invoice_customer_selector = QComboBox()
+        self.invoice_date_edit = QDateEdit(QDate.currentDate())
+        self.invoice_date_edit.setCalendarPopup(True)
+        self.invoice_due_date_edit = QDateEdit(QDate.currentDate().addDays(14))
+        self.invoice_due_date_edit.setCalendarPopup(True)
+
+        top_layout.addRow("<b>Customer:*</b>", self.invoice_customer_selector)
+        top_layout.addRow("<b>Invoice Date:</b>", self.invoice_date_edit)
+        top_layout.addRow("<b>Due Date:</b>", self.invoice_due_date_edit)
+        main_layout.addWidget(top_groupbox)
+
+        # Section 2: Line Items
+        lines_groupbox = QGroupBox("Line Items")
+        lines_layout = QVBoxLayout(lines_groupbox)
+        
+        self.invoice_line_items_table = QTableWidget()
+        self.invoice_line_items_table.setColumnCount(2)
+        self.invoice_line_items_table.setHorizontalHeaderLabels(["Item*", "Quantity*"])
+        self.invoice_line_items_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        self.invoice_line_items_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Interactive)
+        lines_layout.addWidget(self.invoice_line_items_table)
+        
+        line_buttons_layout = QHBoxLayout()
+        self.add_invoice_line_button = QPushButton("Add Line")
+        self.remove_invoice_line_button = QPushButton("Remove Selected Line")
+        line_buttons_layout.addStretch()
+        line_buttons_layout.addWidget(self.add_invoice_line_button)
+        line_buttons_layout.addWidget(self.remove_invoice_line_button)
+        lines_layout.addLayout(line_buttons_layout)
+        main_layout.addWidget(lines_groupbox)
+        
+        # Section 3: Submission
+        submit_layout = QHBoxLayout()
+        self.create_invoice_button = QPushButton("Create Invoice")
+        self.create_invoice_button.setStyleSheet("background-color: #007BFF; color: white; padding: 10px; font-weight: bold;")
+        submit_layout.addStretch()
+        submit_layout.addWidget(self.create_invoice_button)
+        main_layout.addLayout(submit_layout)
+
+        main_layout.addStretch() # Push everything up
+        return sub_tab_widget
 
     def _create_customers_tab(self):
         """Creates the main 'Customers' container tab, which holds its own sub-tabs."""
         customers_main_tabs = QTabWidget()
-
         add_customer_sub_tab = self._create_add_customer_sub_tab()
         customers_main_tabs.addTab(add_customer_sub_tab, "Add Customers")
-
         view_customers_sub_tab = self._create_view_customers_sub_tab()
         customers_main_tabs.addTab(view_customers_sub_tab, "View Customers")
-        
         return customers_main_tabs
 
-    # <<< MODIFIED to remove the "Company Name" column >>>
     def _create_view_customers_sub_tab(self):
         """Creates the UI for the 'View Customers' sub-tab."""
         sub_tab_widget = QWidget()
         main_layout = QVBoxLayout(sub_tab_widget)
         main_layout.setSpacing(10)
-
         top_layout = QHBoxLayout()
         self.refresh_customers_button = QPushButton("Refresh Customer List")
         self.refresh_customers_button.setFixedWidth(180)
         top_layout.addStretch()
         top_layout.addWidget(self.refresh_customers_button)
         main_layout.addLayout(top_layout)
-
         self.customers_view_table = QTableWidget()
-        # Set column count to 2
         self.customers_view_table.setColumnCount(2)
-        # Set the new headers
         self.customers_view_table.setHorizontalHeaderLabels(["Display Name", "Email"])
         self.customers_view_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.customers_view_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self.customers_view_table.setWordWrap(True)
         main_layout.addWidget(self.customers_view_table)
-
         return sub_tab_widget
 
     def _create_add_customer_sub_tab(self):
@@ -70,82 +129,75 @@ class DashboardWidget(QWidget):
         sub_tab_widget = QWidget()
         main_layout = QVBoxLayout(sub_tab_widget)
         main_layout.setSpacing(10)
-
         instructions = QLabel("Add customer details below. The Display Name is required. Click 'Add Row' to add more customers.")
         instructions.setWordWrap(True)
         main_layout.addWidget(instructions)
-
         self.customers_input_table = QTableWidget()
         self.customers_input_table.setColumnCount(2)
         self.customers_input_table.setHorizontalHeaderLabels(["Display Name*", "Email"])
         self.customers_input_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self.customers_input_table.setRowCount(1)
         main_layout.addWidget(self.customers_input_table)
-
         buttons_layout = QHBoxLayout()
         self.add_customer_row_button = QPushButton("Add Row")
         self.remove_customer_row_button = QPushButton("Remove Selected Row(s)")
         self.submit_customers_button = QPushButton("Submit All Customers")
         self.submit_customers_button.setStyleSheet("background-color: #007BFF; color: white; padding: 10px;")
-        
         buttons_layout.addWidget(self.add_customer_row_button)
         buttons_layout.addWidget(self.remove_customer_row_button)
         buttons_layout.addStretch()
         buttons_layout.addWidget(self.submit_customers_button)
         main_layout.addLayout(buttons_layout)
-        
         return sub_tab_widget
 
     def _create_items_tab(self):
-        """Creates the UI for the combined 'Items' tab."""
-        tab_widget = QWidget()
-        main_layout = QVBoxLayout(tab_widget)
-        main_layout.setSpacing(15)
+        """Creates the main 'Items' container tab, which holds its own sub-tabs."""
+        items_main_tabs = QTabWidget()
+        add_item_sub_tab = self._create_add_item_sub_tab()
+        items_main_tabs.addTab(add_item_sub_tab, "Add Item")
+        view_items_sub_tab = self._create_view_items_sub_tab()
+        items_main_tabs.addTab(view_items_sub_tab, "View Item")
+        return items_main_tabs
 
-        add_item_groupbox = QGroupBox("Add New Item")
-        add_item_layout = QVBoxLayout(add_item_groupbox)
-        add_item_layout.setSpacing(10)
-        
+    def _create_add_item_sub_tab(self):
+        """Creates the UI for the 'Add Item' sub-tab."""
+        sub_tab_widget = QWidget()
+        main_layout = QVBoxLayout(sub_tab_widget)
+        main_layout.setSpacing(15)
+        main_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
         form_layout = QFormLayout()
-        
         self.item_name_input = QLineEdit()
         self.item_name_input.setPlaceholderText("e.g., Web Design Services")
-        
         self.item_rate_input = QLineEdit()
         self.item_rate_input.setValidator(QDoubleValidator(0.00, 9999999.99, 2))
         self.item_rate_input.setPlaceholderText("e.g., 150.00")
-
         self.item_description_input = QTextEdit()
         self.item_description_input.setPlaceholderText("A detailed description of the service or product.")
         self.item_description_input.setFixedHeight(80)
-        
         form_layout.addRow("<b>Item Name:*</b>", self.item_name_input)
         form_layout.addRow("<b>Rate:*</b>", self.item_rate_input)
         form_layout.addRow("<b>Description:</b>", self.item_description_input)
-
         self.add_item_button = QPushButton("Add Item")
         self.add_item_button.setFixedWidth(120)
         self.add_item_button.setStyleSheet("background-color: #28a745; color: white; padding: 10px;")
-
         buttons_layout = QHBoxLayout()
         buttons_layout.addStretch()
         buttons_layout.addWidget(self.add_item_button)
+        main_layout.addLayout(form_layout)
+        main_layout.addLayout(buttons_layout)
+        return sub_tab_widget
 
-        add_item_layout.addLayout(form_layout)
-        add_item_layout.addLayout(buttons_layout)
-        main_layout.addWidget(add_item_groupbox)
-
-        view_items_groupbox = QGroupBox("Existing Items")
-        view_items_layout = QVBoxLayout(view_items_groupbox)
-        view_items_layout.setSpacing(10)
-
+    def _create_view_items_sub_tab(self):
+        """Creates the UI for the 'View Item' sub-tab."""
+        sub_tab_widget = QWidget()
+        main_layout = QVBoxLayout(sub_tab_widget)
+        main_layout.setSpacing(10)
         top_layout = QHBoxLayout()
         self.refresh_items_button = QPushButton("Refresh Item List")
         self.refresh_items_button.setFixedWidth(150)
         top_layout.addStretch()
         top_layout.addWidget(self.refresh_items_button)
-        view_items_layout.addLayout(top_layout)
-
+        main_layout.addLayout(top_layout)
         self.items_table = QTableWidget()
         self.items_table.setColumnCount(3)
         self.items_table.setHorizontalHeaderLabels(["Name", "Rate", "Description"])
@@ -154,11 +206,8 @@ class DashboardWidget(QWidget):
         self.items_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Interactive)
         self.items_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
         self.items_table.setWordWrap(True)
-        
-        view_items_layout.addWidget(self.items_table)
-        main_layout.addWidget(view_items_groupbox)
-        
-        return tab_widget
+        main_layout.addWidget(self.items_table)
+        return sub_tab_widget
 
     def _create_account_details_tab(self):
         """Creates the UI for the 'Account Details' sub-tab."""
@@ -166,48 +215,38 @@ class DashboardWidget(QWidget):
         layout = QVBoxLayout(tab_widget)
         layout.setAlignment(Qt.AlignmentFlag.AlignTop)
         layout.setSpacing(15)
-        
         org_selection_layout = QHBoxLayout()
         org_selection_layout.addWidget(QLabel("<b>Select Organization:</b>"))
         self.organization_selector = QComboBox()
         self.organization_selector.setMinimumWidth(300)
-        
         self.refresh_button = QPushButton("Refresh Details")
         self.refresh_button.setFixedWidth(120)
-        
         org_selection_layout.addWidget(self.organization_selector)
         org_selection_layout.addWidget(self.refresh_button)
         org_selection_layout.addStretch()
         layout.addLayout(org_selection_layout)
-
         details_layout = QFormLayout()
         details_layout.setSpacing(10)
         details_layout.setContentsMargins(0, 10, 0, 0)
-        
         self.org_id_label = QLabel("...") 
         self.org_name_label = QLabel("...")
         self.contact_name_label = QLabel("...")
         self.email_label = QLabel("...")
         self.country_label = QLabel("...")
         self.currency_code_label = QLabel("...")
-        
         self.change_sender_name_button = QPushButton("Change Sender Name") 
         self.change_sender_name_button.setFixedWidth(160) 
-
         self.view_email_templates_button = QPushButton("View Email Templates")
         self.view_email_templates_button.setFixedWidth(160)
-
         contact_layout = QHBoxLayout()
         contact_layout.setContentsMargins(0,0,0,0)
         contact_layout.addWidget(self.contact_name_label)
         contact_layout.addStretch()
         contact_layout.addWidget(self.change_sender_name_button)
-        
         template_actions_layout = QHBoxLayout()
         template_actions_layout.setContentsMargins(0,0,0,0)
         template_actions_layout.addWidget(self.view_email_templates_button)
         template_actions_layout.addStretch()
-
         details_layout.addRow("Organization ID:", self.org_id_label)
         details_layout.addRow("Organization Name:", self.org_name_label)
         details_layout.addRow("Primary Contact:", contact_layout) 
@@ -215,9 +254,88 @@ class DashboardWidget(QWidget):
         details_layout.addRow("Country:", self.country_label)
         details_layout.addRow("Currency:", self.currency_code_label)
         details_layout.addRow("Actions:", template_actions_layout)
-        
         layout.addLayout(details_layout)
         return tab_widget
+
+    # <<< NEW METHODS to manage the invoice form >>>
+    def populate_invoice_customer_dropdown(self, customers: list):
+        self.invoice_customer_selector.clear()
+        self.invoice_customer_selector.addItem("--- Select a Customer ---", None)
+        for customer in customers:
+            self.invoice_customer_selector.addItem(
+                customer.get('contact_name', 'N/A'), 
+                customer.get('contact_id', None)
+            )
+
+    def store_item_list(self, items: list):
+        """Stores the fetched item list to be used by invoice line item combos."""
+        self._item_list_data = items
+        # Add a blank row to start
+        if self.invoice_line_items_table.rowCount() == 0:
+            self.add_invoice_line_row()
+
+    def add_invoice_line_row(self):
+        """Adds a new row to the invoice line items table."""
+        row_position = self.invoice_line_items_table.rowCount()
+        self.invoice_line_items_table.insertRow(row_position)
+
+        # Create item selector combo box
+        item_combo = QComboBox()
+        item_combo.addItem("--- Select an Item ---", None)
+        for item in self._item_list_data:
+            item_combo.addItem(item.get('name', 'N/A'), item.get('item_id', None))
+        
+        # Create quantity spin box
+        quantity_spin = QSpinBox()
+        quantity_spin.setMinimum(1)
+        quantity_spin.setMaximum(9999)
+
+        self.invoice_line_items_table.setCellWidget(row_position, 0, item_combo)
+        self.invoice_line_items_table.setCellWidget(row_position, 1, quantity_spin)
+
+    def remove_selected_invoice_line(self):
+        """Removes the currently selected row from the invoice line item table."""
+        current_row = self.invoice_line_items_table.currentRow()
+        if current_row >= 0:
+            self.invoice_line_items_table.removeRow(current_row)
+
+    def get_invoice_data(self):
+        """Reads and validates all data from the create invoice form."""
+        customer_id = self.invoice_customer_selector.currentData()
+        if not customer_id:
+            return None, "You must select a customer."
+
+        invoice_data = {
+            "customer_id": customer_id,
+            "date": self.invoice_date_edit.date().toString("yyyy-MM-dd"),
+            "due_date": self.invoice_due_date_edit.date().toString("yyyy-MM-dd"),
+            "line_items": []
+        }
+        
+        for row in range(self.invoice_line_items_table.rowCount()):
+            item_combo = self.invoice_line_items_table.cellWidget(row, 0)
+            quantity_spin = self.invoice_line_items_table.cellWidget(row, 1)
+            
+            item_id = item_combo.currentData()
+            quantity = quantity_spin.value()
+
+            if item_id:
+                invoice_data["line_items"].append({
+                    "item_id": item_id,
+                    "quantity": quantity
+                })
+        
+        if not invoice_data["line_items"]:
+            return None, "Invoice must have at least one line item."
+            
+        return invoice_data, None
+
+    def clear_invoice_form(self):
+        self.invoice_customer_selector.setCurrentIndex(0)
+        self.invoice_date_edit.setDate(QDate.currentDate())
+        self.invoice_due_date_edit.setDate(QDate.currentDate().addDays(14))
+        self.invoice_line_items_table.setRowCount(0)
+        self.add_invoice_line_row()
 
     def add_customer_input_row(self):
         """Adds a new empty row to the customer input table."""
@@ -235,38 +353,25 @@ class DashboardWidget(QWidget):
         for row in range(self.customers_input_table.rowCount()):
             display_name_item = self.customers_input_table.item(row, 0)
             email_item = self.customers_input_table.item(row, 1)
-
             display_name = display_name_item.text().strip() if display_name_item else ""
-            
             if not display_name:
                 return None, f"Row {row + 1}: Display Name is a required field and cannot be empty."
-
             email_address = email_item.text().strip() if email_item else ""
-            
             customer_data = { "contact_name": display_name }
-
             if email_address:
                 customer_data["contact_persons"] = [{ "email": email_address, "is_primary_contact": True }]
-            
             customers_to_create.append(customer_data)
-        
         return customers_to_create, None
 
-    # <<< MODIFIED to fix email display and remove company name column >>>
     def populate_customers_table(self, customers: list):
         """Clears and populates the customers view table with new data."""
         self.customers_view_table.setRowCount(0)
-        if not customers:
-            return
-            
+        if not customers: return
         self.customers_view_table.setRowCount(len(customers))
         for row, customer in enumerate(customers):
-            # The GET /contacts endpoint returns the primary email at the top level
             email = customer.get('email', '')
-            
             name_item = QTableWidgetItem(customer.get('contact_name', 'N/A'))
             email_item = QTableWidgetItem(email)
-
             self.customers_view_table.setItem(row, 0, name_item)
             self.customers_view_table.setItem(row, 1, email_item)
 
