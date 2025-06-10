@@ -4,8 +4,8 @@ import requests
 import time
 from urllib.parse import urlencode, urlparse, parse_qs
 
-from PyQt6.QtWidgets import QApplication, QMessageBox
-from PyQt6.QtCore import QUrl
+from PyQt6.QtWidgets import QApplication, QMessageBox, QProgressDialog
+from PyQt6.QtCore import QUrl, Qt
 
 from ui.main_window import MainWindow
 from ui.settings_tab import SettingsTab
@@ -25,6 +25,7 @@ class AppController:
         
         # Connect UI signals
         settings_ui = self.view.settings_tab
+        # ... (other settings connections are the same)
         settings_ui.save_button.clicked.connect(self.handle_save_action)
         settings_ui.api_console_button.clicked.connect(self.handle_open_zoho_console)
         settings_ui.add_new_button.clicked.connect(self.prepare_for_add_new)
@@ -36,21 +37,100 @@ class AppController:
         
         # Connect Dashboard signals
         dashboard_ui = self.view.dashboard_widget
-        # This now triggers fetching org details AND items
+        # ... (other dashboard connections are the same)
         dashboard_ui.organization_selector.currentIndexChanged.connect(
             self.handle_organization_selection_changed
         )
         dashboard_ui.change_sender_name_button.clicked.connect(self.handle_open_sender_settings)
         dashboard_ui.view_email_templates_button.clicked.connect(self.handle_view_email_templates)
-        # Refresh button now fetches both org details and items
         dashboard_ui.refresh_button.clicked.connect(self.handle_refresh_all)
         dashboard_ui.add_item_button.clicked.connect(self.handle_add_item)
-        
-        # <<< NEW CONNECTION for the refresh items button >>>
         dashboard_ui.refresh_items_button.clicked.connect(self.handle_fetch_items)
 
+        # <<< NEW CONNECTIONS for customer creation UI >>>
+        dashboard_ui.add_customer_row_button.clicked.connect(self.handle_add_customer_row)
+        dashboard_ui.remove_customer_row_button.clicked.connect(self.handle_remove_customer_row)
+        dashboard_ui.submit_customers_button.clicked.connect(self.handle_submit_customers)
 
         self.refresh_account_list()
+
+    # <<< NEW METHODS to handle the customer creation process >>>
+    def handle_add_customer_row(self):
+        """Tells the view to add a new row to the customer input table."""
+        self.view.dashboard_widget.add_customer_input_row()
+
+    def handle_remove_customer_row(self):
+        """Tells the view to remove selected rows from the customer input table."""
+        self.view.dashboard_widget.remove_selected_customer_rows()
+
+    def handle_submit_customers(self):
+        """Submits all valid customers from the input table to the Zoho API."""
+        dashboard_ui = self.view.dashboard_widget
+        
+        # 1. Get and validate data from the table
+        customers_to_create, error_msg = dashboard_ui.get_and_validate_customer_data()
+        if error_msg:
+            self.view.show_message("Validation Error", error_msg, level='warning')
+            return
+        if not customers_to_create:
+            self.view.show_message("No Data", "There are no customers to submit.", level='warning')
+            return
+
+        # 2. Confirm submission with the user
+        reply = QMessageBox.question(
+            self.view, "Confirm Submission",
+            f"You are about to submit {len(customers_to_create)} customer(s). Continue?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No
+        )
+        if reply == QMessageBox.StandardButton.No:
+            return
+
+        # 3. Get authentication details
+        selected_org_data = dashboard_ui.organization_selector.currentData()
+        organization_id = selected_org_data['organization_id']
+        account_index = self.view.settings_tab.get_selected_account_index()
+        access_token = self.get_valid_access_token(account_index)
+        if not access_token:
+            self.view.show_message("Authentication Error", "Could not get a valid access token.", level='critical')
+            return
+
+        # 4. Process customers with a progress dialog
+        progress = QProgressDialog("Submitting customers...", "Cancel", 0, len(customers_to_create), self.view)
+        progress.setWindowModality(Qt.WindowModality.WindowModal)
+        
+        success_count = 0
+        failed_entries = []
+
+        for i, customer in enumerate(customers_to_create):
+            progress.setValue(i)
+            progress.setLabelText(f"Submitting '{customer['contact_name']}'...")
+            if progress.wasCanceled():
+                break
+
+            try:
+                response = self.invoice_api.create_customer(access_token, organization_id, customer)
+                if response.get('code') == 0:
+                    success_count += 1
+                else:
+                    error = response.get('message', 'Unknown API error')
+                    failed_entries.append(f"'{customer['contact_name']}': {error}")
+            except Exception as e:
+                failed_entries.append(f"'{customer['contact_name']}': {e}")
+        
+        progress.setValue(len(customers_to_create))
+
+        # 5. Show summary report
+        summary_message = f"Submission Complete!\n\n- Successful: {success_count}\n- Failed: {len(failed_entries)}"
+        if failed_entries:
+            summary_message += "\n\nFailures:\n" + "\n".join(f"- {entry}" for entry in failed_entries)
+        
+        QMessageBox.information(self.view, "Submission Report", summary_message)
+        
+        # Clear the table if all were successful
+        if success_count > 0 and not failed_entries:
+             dashboard_ui.customers_input_table.setRowCount(1)
+             dashboard_ui.customers_input_table.clearContents()
 
     def run(self):
         self.view.show()
@@ -60,20 +140,17 @@ class AppController:
         self.handle_fetch_org_details()
         self.handle_fetch_items()
 
-    # <<< NEW METHOD to fetch and display items >>>
     def handle_fetch_items(self):
         """Fetches the item list for the selected organization and populates the table."""
         self.view.statusBar().showMessage("Fetching items...")
         
-        # Get organization ID
         selected_org_data = self.view.dashboard_widget.organization_selector.currentData()
         if not selected_org_data or 'organization_id' not in selected_org_data:
             self.view.statusBar().showMessage("Select an organization to view items.")
-            self.view.dashboard_widget.populate_items_table([]) # Clear table
+            self.view.dashboard_widget.populate_items_table([])
             return
         organization_id = selected_org_data['organization_id']
 
-        # Get access token
         account_index = self.view.settings_tab.get_selected_account_index()
         access_token = self.get_valid_access_token(account_index)
         if not access_token:
@@ -93,7 +170,6 @@ class AppController:
         except Exception as e:
             self.view.show_message("Error", f"An unexpected error occurred while fetching items: {e}", level='critical')
             self.view.statusBar().showMessage("Ready")
-
 
     def handle_add_item(self):
         """Handles the logic for the 'Add Item' button click."""
@@ -139,7 +215,7 @@ class AppController:
             if response.get('code') == 0:
                 self.view.show_message("Success", f"Item '{item_name}' was added successfully.")
                 dashboard_ui.clear_add_item_form()
-                self.handle_fetch_items() # Refresh the item list after adding a new one
+                self.handle_fetch_items()
             else:
                 message = response.get('message', 'An unknown API error occurred.')
                 self.view.show_message("API Error", f"Could not add item: {message}", level='critical')
@@ -152,7 +228,6 @@ class AppController:
         """Displays org details and fetches items for the selected org."""
         selected_org_data = self.view.dashboard_widget.organization_selector.currentData()
         self.view.dashboard_widget.display_organization_details(selected_org_data)
-        # Automatically fetch items when a new organization is selected
         if selected_org_data:
             self.handle_fetch_items()
         
@@ -203,7 +278,6 @@ class AppController:
         
         org_id = selected_org_data['organization_id']
         url = f"https://invoice.zoho.com/app/{org_id}#/settings/emails/preference"
-        
         self.view.open_url_in_browser_tab(url)
 
     def get_valid_access_token(self, account_index: int) -> str | None:
