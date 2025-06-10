@@ -4,7 +4,7 @@
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QTabWidget, QLabel, QPushButton, 
                              QFormLayout, QHBoxLayout, QComboBox, QLineEdit, QTextEdit,
                              QTableWidget, QTableWidgetItem, QHeaderView, QGroupBox,
-                             QDateEdit, QSpinBox)
+                             QDateEdit, QSpinBox, QAbstractItemView)
 from PyQt6.QtCore import Qt, QDate
 from PyQt6.QtGui import QDoubleValidator
 
@@ -27,14 +27,49 @@ class DashboardWidget(QWidget):
         self.customers_tab = self._create_customers_tab()
         self.sub_tabs.addTab(self.customers_tab, "Customers")
 
-        # <<< CREATE AND ADD THE NEW "INVOICE" TAB >>>
         self.invoice_tab = self._create_invoice_tab()
         self.sub_tabs.addTab(self.invoice_tab, "Invoice")
+
+        # <<< CREATE AND ADD THE NEW "SEND INVOICE" TAB >>>
+        self.send_invoice_tab = self._create_send_invoice_tab()
+        self.sub_tabs.addTab(self.send_invoice_tab, "Send Invoice")
 
         # Store item data for populating combos
         self._item_list_data = []
 
-    # <<< NEW METHOD for the main "Invoice" tab >>>
+    # <<< NEW METHOD for the "Send Invoice" tab >>>
+    def _create_send_invoice_tab(self):
+        """Creates the UI for sending draft invoices."""
+        tab_widget = QWidget()
+        main_layout = QVBoxLayout(tab_widget)
+        main_layout.setSpacing(10)
+
+        top_layout = QHBoxLayout()
+        self.refresh_draft_invoices_button = QPushButton("Refresh Drafts")
+        top_layout.addWidget(QLabel("Showing all invoices with 'Draft' status."))
+        top_layout.addStretch()
+        top_layout.addWidget(self.refresh_draft_invoices_button)
+        main_layout.addLayout(top_layout)
+
+        self.draft_invoices_table = QTableWidget()
+        self.draft_invoices_table.setColumnCount(5)
+        self.draft_invoices_table.setHorizontalHeaderLabels(["Customer Name", "Invoice #", "Date", "Due Date", "Amount"])
+        self.draft_invoices_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        # Allow multi-selection of rows
+        self.draft_invoices_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.draft_invoices_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self.draft_invoices_table.setWordWrap(True)
+        main_layout.addWidget(self.draft_invoices_table)
+
+        bottom_layout = QHBoxLayout()
+        self.send_selected_invoices_button = QPushButton("Send Selected Invoice(s)")
+        self.send_selected_invoices_button.setStyleSheet("background-color: #28a745; color: white; padding: 10px; font-weight: bold;")
+        bottom_layout.addStretch()
+        bottom_layout.addWidget(self.send_selected_invoices_button)
+        main_layout.addLayout(bottom_layout)
+        
+        return tab_widget
+
     def _create_invoice_tab(self):
         """Creates the main 'Invoice' container tab."""
         invoice_main_tabs = QTabWidget()
@@ -42,39 +77,30 @@ class DashboardWidget(QWidget):
         invoice_main_tabs.addTab(create_invoice_sub_tab, "Create Invoice")
         return invoice_main_tabs
 
-    # <<< NEW HELPER for the "Create Invoice" sub-tab form >>>
     def _create_create_invoice_sub_tab(self):
         """Creates the UI for the 'Create Invoice' sub-tab."""
         sub_tab_widget = QWidget()
         main_layout = QVBoxLayout(sub_tab_widget)
         main_layout.setSpacing(15)
-
-        # Section 1: Customer and Dates
         top_groupbox = QGroupBox("Invoice Details")
         top_layout = QFormLayout(top_groupbox)
-
         self.invoice_customer_selector = QComboBox()
         self.invoice_date_edit = QDateEdit(QDate.currentDate())
         self.invoice_date_edit.setCalendarPopup(True)
         self.invoice_due_date_edit = QDateEdit(QDate.currentDate().addDays(14))
         self.invoice_due_date_edit.setCalendarPopup(True)
-
         top_layout.addRow("<b>Customer:*</b>", self.invoice_customer_selector)
         top_layout.addRow("<b>Invoice Date:</b>", self.invoice_date_edit)
         top_layout.addRow("<b>Due Date:</b>", self.invoice_due_date_edit)
         main_layout.addWidget(top_groupbox)
-
-        # Section 2: Line Items
         lines_groupbox = QGroupBox("Line Items")
         lines_layout = QVBoxLayout(lines_groupbox)
-        
         self.invoice_line_items_table = QTableWidget()
         self.invoice_line_items_table.setColumnCount(2)
         self.invoice_line_items_table.setHorizontalHeaderLabels(["Item*", "Quantity*"])
         self.invoice_line_items_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         self.invoice_line_items_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Interactive)
         lines_layout.addWidget(self.invoice_line_items_table)
-        
         line_buttons_layout = QHBoxLayout()
         self.add_invoice_line_button = QPushButton("Add Line")
         self.remove_invoice_line_button = QPushButton("Remove Selected Line")
@@ -83,16 +109,13 @@ class DashboardWidget(QWidget):
         line_buttons_layout.addWidget(self.remove_invoice_line_button)
         lines_layout.addLayout(line_buttons_layout)
         main_layout.addWidget(lines_groupbox)
-        
-        # Section 3: Submission
         submit_layout = QHBoxLayout()
         self.create_invoice_button = QPushButton("Create Invoice")
         self.create_invoice_button.setStyleSheet("background-color: #007BFF; color: white; padding: 10px; font-weight: bold;")
         submit_layout.addStretch()
         submit_layout.addWidget(self.create_invoice_button)
         main_layout.addLayout(submit_layout)
-
-        main_layout.addStretch() # Push everything up
+        main_layout.addStretch()
         return sub_tab_widget
 
     def _create_customers_tab(self):
@@ -257,98 +280,45 @@ class DashboardWidget(QWidget):
         layout.addLayout(details_layout)
         return tab_widget
 
-    # <<< NEW METHODS to manage the invoice form >>>
-    def populate_invoice_customer_dropdown(self, customers: list):
-        self.invoice_customer_selector.clear()
-        self.invoice_customer_selector.addItem("--- Select a Customer ---", None)
-        for customer in customers:
-            self.invoice_customer_selector.addItem(
-                customer.get('contact_name', 'N/A'), 
-                customer.get('contact_id', None)
-            )
-
-    def store_item_list(self, items: list):
-        """Stores the fetched item list to be used by invoice line item combos."""
-        self._item_list_data = items
-        # Add a blank row to start
-        if self.invoice_line_items_table.rowCount() == 0:
-            self.add_invoice_line_row()
-
-    def add_invoice_line_row(self):
-        """Adds a new row to the invoice line items table."""
-        row_position = self.invoice_line_items_table.rowCount()
-        self.invoice_line_items_table.insertRow(row_position)
-
-        # Create item selector combo box
-        item_combo = QComboBox()
-        item_combo.addItem("--- Select an Item ---", None)
-        for item in self._item_list_data:
-            item_combo.addItem(item.get('name', 'N/A'), item.get('item_id', None))
+    # <<< NEW METHODS for the Send Invoice tab >>>
+    def populate_draft_invoices_table(self, invoices: list):
+        """Populates the draft invoices table."""
+        self.draft_invoices_table.setRowCount(0)
+        if not invoices:
+            return
         
-        # Create quantity spin box
-        quantity_spin = QSpinBox()
-        quantity_spin.setMinimum(1)
-        quantity_spin.setMaximum(9999)
+        self.draft_invoices_table.setRowCount(len(invoices))
+        for row, invoice in enumerate(invoices):
+            # Store the invoice ID in the first item for later retrieval
+            customer_name_item = QTableWidgetItem(invoice.get('customer_name', 'N/A'))
+            customer_name_item.setData(Qt.ItemDataRole.UserRole, invoice.get('invoice_id'))
 
-        self.invoice_line_items_table.setCellWidget(row_position, 0, item_combo)
-        self.invoice_line_items_table.setCellWidget(row_position, 1, quantity_spin)
+            self.draft_invoices_table.setItem(row, 0, customer_name_item)
+            self.draft_invoices_table.setItem(row, 1, QTableWidgetItem(invoice.get('invoice_number', '')))
+            self.draft_invoices_table.setItem(row, 2, QTableWidgetItem(invoice.get('date', '')))
+            self.draft_invoices_table.setItem(row, 3, QTableWidgetItem(invoice.get('due_date', '')))
+            self.draft_invoices_table.setItem(row, 4, QTableWidgetItem(f"{invoice.get('total', 0.0):.2f}"))
 
-    def remove_selected_invoice_line(self):
-        """Removes the currently selected row from the invoice line item table."""
-        current_row = self.invoice_line_items_table.currentRow()
-        if current_row >= 0:
-            self.invoice_line_items_table.removeRow(current_row)
+    def get_selected_invoice_ids(self):
+        """Gets the invoice_ids of the selected rows in the draft invoices table."""
+        ids = []
+        selected_rows = sorted(list(set(index.row() for index in self.draft_invoices_table.selectedIndexes())))
+        for row in selected_rows:
+            item = self.draft_invoices_table.item(row, 0)
+            if item and item.data(Qt.ItemDataRole.UserRole):
+                ids.append(item.data(Qt.ItemDataRole.UserRole))
+        return ids
 
-    def get_invoice_data(self):
-        """Reads and validates all data from the create invoice form."""
-        customer_id = self.invoice_customer_selector.currentData()
-        if not customer_id:
-            return None, "You must select a customer."
-
-        invoice_data = {
-            "customer_id": customer_id,
-            "date": self.invoice_date_edit.date().toString("yyyy-MM-dd"),
-            "due_date": self.invoice_due_date_edit.date().toString("yyyy-MM-dd"),
-            "line_items": []
-        }
-        
-        for row in range(self.invoice_line_items_table.rowCount()):
-            item_combo = self.invoice_line_items_table.cellWidget(row, 0)
-            quantity_spin = self.invoice_line_items_table.cellWidget(row, 1)
-            
-            item_id = item_combo.currentData()
-            quantity = quantity_spin.value()
-
-            if item_id:
-                invoice_data["line_items"].append({
-                    "item_id": item_id,
-                    "quantity": quantity
-                })
-        
-        if not invoice_data["line_items"]:
-            return None, "Invoice must have at least one line item."
-            
-        return invoice_data, None
-
-    def clear_invoice_form(self):
-        self.invoice_customer_selector.setCurrentIndex(0)
-        self.invoice_date_edit.setDate(QDate.currentDate())
-        self.invoice_due_date_edit.setDate(QDate.currentDate().addDays(14))
-        self.invoice_line_items_table.setRowCount(0)
-        self.add_invoice_line_row()
 
     def add_customer_input_row(self):
-        """Adds a new empty row to the customer input table."""
         self.customers_input_table.insertRow(self.customers_input_table.rowCount())
 
     def remove_selected_customer_rows(self):
-        """Removes all currently selected rows from the customer input table."""
         selected_rows = sorted(list(set(index.row() for index in self.customers_input_table.selectedIndexes())), reverse=True)
         for row in selected_rows:
             self.customers_input_table.removeRow(row)
 
     def get_and_validate_customer_data(self):
-        """Reads and validates all customer data from the input table."""
         customers_to_create = []
         for row in range(self.customers_input_table.rowCount()):
             display_name_item = self.customers_input_table.item(row, 0)
@@ -364,7 +334,6 @@ class DashboardWidget(QWidget):
         return customers_to_create, None
 
     def populate_customers_table(self, customers: list):
-        """Clears and populates the customers view table with new data."""
         self.customers_view_table.setRowCount(0)
         if not customers: return
         self.customers_view_table.setRowCount(len(customers))
@@ -376,7 +345,6 @@ class DashboardWidget(QWidget):
             self.customers_view_table.setItem(row, 1, email_item)
 
     def populate_items_table(self, items: list):
-        """Clears and populates the items table with new data."""
         self.items_table.setRowCount(0)
         if not items: return
         self.items_table.setRowCount(len(items))
@@ -431,8 +399,74 @@ class DashboardWidget(QWidget):
         self.organization_selector.blockSignals(False)
         self.populate_items_table([])
         self.populate_customers_table([])
+        # Also clear the draft invoices table
+        self.populate_draft_invoices_table([])
 
     def clear_add_item_form(self):
         self.item_name_input.clear()
         self.item_rate_input.clear()
         self.item_description_input.clear()
+
+    def populate_invoice_customer_dropdown(self, customers: list):
+        self.invoice_customer_selector.clear()
+        self.invoice_customer_selector.addItem("--- Select a Customer ---", None)
+        for customer in customers:
+            self.invoice_customer_selector.addItem(
+                customer.get('contact_name', 'N/A'), 
+                customer.get('contact_id', None)
+            )
+
+    def store_item_list(self, items: list):
+        """Stores the fetched item list to be used by invoice line item combos."""
+        self._item_list_data = items
+        if self.invoice_line_items_table.rowCount() == 0:
+            self.add_invoice_line_row()
+
+    def add_invoice_line_row(self):
+        """Adds a new row to the invoice line items table."""
+        row_position = self.invoice_line_items_table.rowCount()
+        self.invoice_line_items_table.insertRow(row_position)
+        item_combo = QComboBox()
+        item_combo.addItem("--- Select an Item ---", None)
+        for item in self._item_list_data:
+            item_combo.addItem(item.get('name', 'N/A'), item.get('item_id', None))
+        quantity_spin = QSpinBox()
+        quantity_spin.setMinimum(1)
+        quantity_spin.setMaximum(9999)
+        self.invoice_line_items_table.setCellWidget(row_position, 0, item_combo)
+        self.invoice_line_items_table.setCellWidget(row_position, 1, quantity_spin)
+
+    def remove_selected_invoice_line(self):
+        """Removes the currently selected row from the invoice line item table."""
+        current_row = self.invoice_line_items_table.currentRow()
+        if current_row >= 0:
+            self.invoice_line_items_table.removeRow(current_row)
+
+    def get_invoice_data(self):
+        """Reads and validates all data from the create invoice form."""
+        customer_id = self.invoice_customer_selector.currentData()
+        if not customer_id:
+            return None, "You must select a customer."
+        invoice_data = {
+            "customer_id": customer_id,
+            "date": self.invoice_date_edit.date().toString("yyyy-MM-dd"),
+            "due_date": self.invoice_due_date_edit.date().toString("yyyy-MM-dd"),
+            "line_items": []
+        }
+        for row in range(self.invoice_line_items_table.rowCount()):
+            item_combo = self.invoice_line_items_table.cellWidget(row, 0)
+            quantity_spin = self.invoice_line_items_table.cellWidget(row, 1)
+            item_id = item_combo.currentData()
+            quantity = quantity_spin.value()
+            if item_id:
+                invoice_data["line_items"].append({ "item_id": item_id, "quantity": quantity })
+        if not invoice_data["line_items"]:
+            return None, "Invoice must have at least one line item."
+        return invoice_data, None
+
+    def clear_invoice_form(self):
+        self.invoice_customer_selector.setCurrentIndex(0)
+        self.invoice_date_edit.setDate(QDate.currentDate())
+        self.invoice_due_date_edit.setDate(QDate.currentDate().addDays(14))
+        self.invoice_line_items_table.setRowCount(0)
+        self.add_invoice_line_row()

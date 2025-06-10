@@ -52,6 +52,9 @@ class AppController:
         dashboard_ui.add_invoice_line_button.clicked.connect(self.handle_add_invoice_line)
         dashboard_ui.remove_invoice_line_button.clicked.connect(self.handle_remove_invoice_line)
         dashboard_ui.create_invoice_button.clicked.connect(self.handle_create_invoice)
+        # <<< CONNECTIONS for the Send Invoice Tab >>>
+        dashboard_ui.refresh_draft_invoices_button.clicked.connect(self.handle_fetch_draft_invoices)
+        dashboard_ui.send_selected_invoices_button.clicked.connect(self.handle_send_selected_invoices)
 
         self.refresh_account_list()
 
@@ -98,6 +101,82 @@ class AppController:
         finally:
             self.view.statusBar().showMessage("Ready")
 
+    def handle_fetch_draft_invoices(self):
+        """Fetches invoices with 'draft' status and populates the table."""
+        self.view.statusBar().showMessage("Fetching draft invoices...")
+        selected_org_data = self.view.dashboard_widget.organization_selector.currentData()
+        if not selected_org_data or 'organization_id' not in selected_org_data:
+            self.view.statusBar().showMessage("Select an organization to view drafts.")
+            self.view.dashboard_widget.populate_draft_invoices_table([])
+            return
+        organization_id = selected_org_data['organization_id']
+        account_index = self.view.settings_tab.get_selected_account_index()
+        access_token = self.get_valid_access_token(account_index)
+        if not access_token:
+            return
+        try:
+            response = self.invoice_api.get_draft_invoices(access_token, organization_id)
+            if response.get('code') == 0:
+                invoices_list = response.get('invoices', [])
+                self.view.dashboard_widget.populate_draft_invoices_table(invoices_list)
+                self.view.statusBar().showMessage(f"Found {len(invoices_list)} draft invoice(s).")
+            else:
+                self.view.show_message("API Error", f"Could not fetch drafts: {response.get('message')}", level='critical')
+        except Exception as e:
+            self.view.show_message("Error", f"An error occurred while fetching drafts: {e}", level='critical')
+        finally:
+            self.view.statusBar().showMessage("Ready")
+
+    def handle_send_selected_invoices(self):
+        """Sends all selected invoices from the draft table."""
+        selected_ids = self.view.dashboard_widget.get_selected_invoice_ids()
+        if not selected_ids:
+            self.view.show_message("No Selection", "Please select one or more invoices to send.", level='warning')
+            return
+
+        reply = QMessageBox.question(
+            self.view, "Confirm Send",
+            f"You are about to send {len(selected_ids)} invoice(s). This action cannot be undone. Continue?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No
+        )
+        if reply == QMessageBox.StandardButton.No:
+            return
+
+        organization_id = self.view.dashboard_widget.organization_selector.currentData()['organization_id']
+        account_index = self.view.settings_tab.get_selected_account_index()
+        access_token = self.get_valid_access_token(account_index)
+        if not access_token:
+            return
+
+        progress = QProgressDialog("Sending invoices...", "Cancel", 0, len(selected_ids), self.view)
+        progress.setWindowModality(Qt.WindowModality.WindowModal)
+
+        success_count = 0
+        failed_entries = []
+
+        for i, invoice_id in enumerate(selected_ids):
+            progress.setValue(i)
+            if progress.wasCanceled():
+                break
+            try:
+                response = self.invoice_api.send_invoice_email(access_token, organization_id, invoice_id)
+                if response.get('code') == 0:
+                    success_count += 1
+                else:
+                    failed_entries.append(f"Invoice ID {invoice_id}: {response.get('message')}")
+            except Exception as e:
+                failed_entries.append(f"Invoice ID {invoice_id}: {e}")
+        
+        progress.setValue(len(selected_ids))
+
+        summary_message = f"Send Complete!\n\n- Successful: {success_count}\n- Failed: {len(failed_entries)}"
+        if failed_entries:
+            summary_message += "\n\nFailures:\n" + "\n".join(f"- {entry}" for entry in failed_entries)
+        QMessageBox.information(self.view, "Send Report", summary_message)
+        
+        # Refresh the list to show the updated status
+        self.handle_fetch_draft_invoices()
 
     def handle_fetch_customers(self):
         """Fetches the customer list and populates both customer tables/dropdowns."""
@@ -240,6 +319,7 @@ class AppController:
         self.handle_fetch_org_details()
         self.handle_fetch_items()
         self.handle_fetch_customers()
+        self.handle_fetch_draft_invoices()
 
     def handle_add_item(self):
         """Handles the logic for the 'Add Item' button click."""
@@ -301,6 +381,7 @@ class AppController:
         if selected_org_data:
             self.handle_fetch_items()
             self.handle_fetch_customers()
+            self.handle_fetch_draft_invoices()
         
     def handle_view_email_templates(self):
         selected_org_data = self.view.dashboard_widget.organization_selector.currentData()
