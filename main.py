@@ -205,13 +205,43 @@ class AppController:
         self.view.show()
 
     def handle_refresh_data_for_current_org(self):
-        """Refreshes items, customers, and draft invoices for the current org."""
-        self.view.statusBar().showMessage("Refreshing all data for current organization...")
-        # Note: We do NOT call handle_fetch_organizations() here to prevent an infinite loop.
+        """
+        Fetches a fresh copy of the organization list to update details,
+        then refreshes all related data for the current organization.
+        """
+        self.view.statusBar().showMessage("Refreshing all data...")
+
+        # 1. Remember which organization is currently selected
+        current_org_data = self.view.dashboard_widget.organization_selector.currentData()
+        if not current_org_data:
+            self.view.statusBar().showMessage("No organization selected to refresh.", 5000)
+            return
+        current_org_id = current_org_data['organization_id']
+
+        # 2. Re-fetch the list of all organizations to get any updates
+        account_index = self.view.settings_tab.get_selected_account_index()
+        access_token = self.get_valid_access_token(account_index)
+        if not access_token:
+            return
+            
+        try:
+            org_response = self.invoice_api.get_organizations(access_token)
+            if org_response.get('code') == 0:
+                # 3. Repopulate the dropdown with the fresh data
+                organizations_list = org_response.get('organizations', [])
+                self.view.dashboard_widget.populate_organizations_list(organizations_list, current_org_id)
+            else:
+                self.view.show_message("Refresh Error", "Could not fetch updated organization details.", level='warning')
+
+        except Exception as e:
+            self.view.show_message("Refresh Error", f"An error occurred: {e}", level='warning')
+            return # Stop if we can't get org details
+
+        # 4. Now, refresh all other data as before
         self.handle_fetch_items()
         self.handle_fetch_customers()
         self.handle_fetch_draft_invoices()
-        self.view.statusBar().showMessage("All data refreshed.")
+        self.view.statusBar().showMessage("All data refreshed.", 5000)
     
     # def handle_refresh_all(self):
     #     """Refreshes org details, items, customers, and draft invoices."""

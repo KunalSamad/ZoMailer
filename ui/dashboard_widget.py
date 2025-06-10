@@ -30,14 +30,11 @@ class DashboardWidget(QWidget):
         self.invoice_tab = self._create_invoice_tab()
         self.sub_tabs.addTab(self.invoice_tab, "Invoice")
 
-        # <<< CREATE AND ADD THE NEW "SEND INVOICE" TAB >>>
-        self.send_invoice_tab = self._create_send_invoice_tab()
-        self.sub_tabs.addTab(self.send_invoice_tab, "Send Invoice")
+        # <<< The "Send Invoice" tab is no longer added to the main tab widget here >>>
 
         # Store item data for populating combos
         self._item_list_data = []
 
-    # <<< NEW METHOD for the "Send Invoice" tab >>>
     def _create_send_invoice_tab(self):
         """Creates the UI for sending draft invoices."""
         tab_widget = QWidget()
@@ -55,7 +52,6 @@ class DashboardWidget(QWidget):
         self.draft_invoices_table.setColumnCount(5)
         self.draft_invoices_table.setHorizontalHeaderLabels(["Customer Name", "Invoice #", "Date", "Due Date", "Amount"])
         self.draft_invoices_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        # Allow multi-selection of rows
         self.draft_invoices_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.draft_invoices_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self.draft_invoices_table.setWordWrap(True)
@@ -70,11 +66,19 @@ class DashboardWidget(QWidget):
         
         return tab_widget
 
+    # <<< MODIFIED to include "Send Invoice" as a sub-tab >>>
     def _create_invoice_tab(self):
         """Creates the main 'Invoice' container tab."""
         invoice_main_tabs = QTabWidget()
+
+        # Create and add the first sub-tab
         create_invoice_sub_tab = self._create_create_invoice_sub_tab()
         invoice_main_tabs.addTab(create_invoice_sub_tab, "Create Invoice")
+
+        # Create and add the second sub-tab
+        send_invoice_sub_tab = self._create_send_invoice_tab()
+        invoice_main_tabs.addTab(send_invoice_sub_tab, "Send Invoice")
+
         return invoice_main_tabs
 
     def _create_create_invoice_sub_tab(self):
@@ -233,7 +237,6 @@ class DashboardWidget(QWidget):
         return sub_tab_widget
 
     def _create_account_details_tab(self):
-        """Creates the UI for the 'Account Details' sub-tab."""
         tab_widget = QWidget()
         layout = QVBoxLayout(tab_widget)
         layout.setAlignment(Qt.AlignmentFlag.AlignTop)
@@ -280,7 +283,6 @@ class DashboardWidget(QWidget):
         layout.addLayout(details_layout)
         return tab_widget
 
-    # <<< NEW METHODS for the Send Invoice tab >>>
     def populate_draft_invoices_table(self, invoices: list):
         """Populates the draft invoices table."""
         self.draft_invoices_table.setRowCount(0)
@@ -289,16 +291,12 @@ class DashboardWidget(QWidget):
         
         self.draft_invoices_table.setRowCount(len(invoices))
         for row, invoice in enumerate(invoices):
-            # <<< THIS IS THE CHANGE >>>
-            # Store a dictionary of important IDs for later retrieval
             user_data = {
                 "invoice_id": invoice.get('invoice_id'),
                 "customer_id": invoice.get('customer_id')
             }
             customer_name_item = QTableWidgetItem(invoice.get('customer_name', 'N/A'))
             customer_name_item.setData(Qt.ItemDataRole.UserRole, user_data)
-            # <<< END OF CHANGE >>>
-
             self.draft_invoices_table.setItem(row, 0, customer_name_item)
             self.draft_invoices_table.setItem(row, 1, QTableWidgetItem(invoice.get('invoice_number', '')))
             self.draft_invoices_table.setItem(row, 2, QTableWidgetItem(invoice.get('date', '')))
@@ -314,7 +312,6 @@ class DashboardWidget(QWidget):
             if item and item.data(Qt.ItemDataRole.UserRole):
                 data_list.append(item.data(Qt.ItemDataRole.UserRole))
         return data_list
-
 
     def add_customer_input_row(self):
         self.customers_input_table.insertRow(self.customers_input_table.rowCount())
@@ -366,7 +363,8 @@ class DashboardWidget(QWidget):
         self.items_table.resizeColumnsToContents()
         self.items_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
 
-    def populate_organizations_list(self, organizations: list):
+    def populate_organizations_list(self, organizations: list, org_id_to_select: str = None):
+        """Populates the organization dropdown and optionally re-selects an organization."""
         self.organization_selector.blockSignals(True)
         self.organization_selector.clear()
         if not organizations:
@@ -374,9 +372,18 @@ class DashboardWidget(QWidget):
         else:
             for org in organizations:
                 self.organization_selector.addItem(org.get('name', 'Unnamed Org'), org)
+        if org_id_to_select:
+            for i in range(self.organization_selector.count()):
+                org_data = self.organization_selector.itemData(i)
+                if org_data and org_data.get('organization_id') == org_id_to_select:
+                    self.organization_selector.setCurrentIndex(i)
+                    break
         self.organization_selector.blockSignals(False)
-        if self.organization_selector.count() > 0:
-            self.organization_selector.currentIndexChanged.emit(0)
+        if self.organization_selector.currentIndex() == -1 and self.organization_selector.count() > 0:
+             self.organization_selector.setCurrentIndex(0)
+             self.organization_selector.currentIndexChanged.emit(0)
+        else:
+             self.display_organization_details(self.organization_selector.currentData())
 
     def display_organization_details(self, details: dict | None):
         if not details:
@@ -405,7 +412,6 @@ class DashboardWidget(QWidget):
         self.organization_selector.blockSignals(False)
         self.populate_items_table([])
         self.populate_customers_table([])
-        # Also clear the draft invoices table
         self.populate_draft_invoices_table([])
 
     def clear_add_item_form(self):
@@ -419,7 +425,7 @@ class DashboardWidget(QWidget):
         for customer in customers:
             self.invoice_customer_selector.addItem(
                 customer.get('contact_name', 'N/A'), 
-                customer.get('contact_id', None)
+                customer
             )
 
     def store_item_list(self, items: list):
@@ -450,11 +456,15 @@ class DashboardWidget(QWidget):
 
     def get_invoice_data(self):
         """Reads and validates all data from the create invoice form."""
-        customer_id = self.invoice_customer_selector.currentData()
-        if not customer_id:
+        customer_data = self.invoice_customer_selector.currentData()
+        if not customer_data or not customer_data.get('contact_id'):
             return None, "You must select a customer."
+        
+        if not customer_data.get('email'):
+             return None, f"Selected customer '{customer_data.get('contact_name')}' has no email address. Please update the customer record before creating an invoice."
+
         invoice_data = {
-            "customer_id": customer_id,
+            "customer_id": customer_data['contact_id'],
             "date": self.invoice_date_edit.date().toString("yyyy-MM-dd"),
             "due_date": self.invoice_due_date_edit.date().toString("yyyy-MM-dd"),
             "line_items": []
