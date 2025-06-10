@@ -23,26 +23,48 @@ class DashboardWidget(QWidget):
         self.items_tab = self._create_items_tab()
         self.sub_tabs.addTab(self.items_tab, "Items")
         
-        # <<< RENAMED MAIN TAB to "Customers" and refactored its creation >>>
         self.customers_tab = self._create_customers_tab()
         self.sub_tabs.addTab(self.customers_tab, "Customers")
 
 
-    # <<< METHOD RENAMED AND REFACTORED to create a container tab widget >>>
     def _create_customers_tab(self):
         """Creates the main 'Customers' container tab, which holds its own sub-tabs."""
-        # This is now a tab widget itself to hold sub-tabs
         customers_main_tabs = QTabWidget()
 
-        # Create the "Add Customers" sub-tab and add it
         add_customer_sub_tab = self._create_add_customer_sub_tab()
         customers_main_tabs.addTab(add_customer_sub_tab, "Add Customers")
 
-        # You could add other customer-related sub-tabs here in the future (e.g., "View Customers")
+        view_customers_sub_tab = self._create_view_customers_sub_tab()
+        customers_main_tabs.addTab(view_customers_sub_tab, "View Customers")
         
         return customers_main_tabs
 
-    # <<< NEW HELPER METHOD to create the content for the "Add Customers" sub-tab >>>
+    # <<< MODIFIED to remove the "Company Name" column >>>
+    def _create_view_customers_sub_tab(self):
+        """Creates the UI for the 'View Customers' sub-tab."""
+        sub_tab_widget = QWidget()
+        main_layout = QVBoxLayout(sub_tab_widget)
+        main_layout.setSpacing(10)
+
+        top_layout = QHBoxLayout()
+        self.refresh_customers_button = QPushButton("Refresh Customer List")
+        self.refresh_customers_button.setFixedWidth(180)
+        top_layout.addStretch()
+        top_layout.addWidget(self.refresh_customers_button)
+        main_layout.addLayout(top_layout)
+
+        self.customers_view_table = QTableWidget()
+        # Set column count to 2
+        self.customers_view_table.setColumnCount(2)
+        # Set the new headers
+        self.customers_view_table.setHorizontalHeaderLabels(["Display Name", "Email"])
+        self.customers_view_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.customers_view_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self.customers_view_table.setWordWrap(True)
+        main_layout.addWidget(self.customers_view_table)
+
+        return sub_tab_widget
+
     def _create_add_customer_sub_tab(self):
         """Creates the UI for the 'Add Customers' sub-tab."""
         sub_tab_widget = QWidget()
@@ -54,9 +76,7 @@ class DashboardWidget(QWidget):
         main_layout.addWidget(instructions)
 
         self.customers_input_table = QTableWidget()
-        # <<< COLUMN COUNT REDUCED TO 2 >>>
         self.customers_input_table.setColumnCount(2)
-        # <<< "Company Name" HEADER REMOVED >>>
         self.customers_input_table.setHorizontalHeaderLabels(["Display Name*", "Email"])
         self.customers_input_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self.customers_input_table.setRowCount(1)
@@ -75,7 +95,6 @@ class DashboardWidget(QWidget):
         main_layout.addLayout(buttons_layout)
         
         return sub_tab_widget
-
 
     def _create_items_tab(self):
         """Creates the UI for the combined 'Items' tab."""
@@ -210,7 +229,6 @@ class DashboardWidget(QWidget):
         for row in selected_rows:
             self.customers_input_table.removeRow(row)
 
-    # <<< MODIFIED to remove "company_name" logic >>>
     def get_and_validate_customer_data(self):
         """Reads and validates all customer data from the input table."""
         customers_to_create = []
@@ -224,23 +242,33 @@ class DashboardWidget(QWidget):
                 return None, f"Row {row + 1}: Display Name is a required field and cannot be empty."
 
             email_address = email_item.text().strip() if email_item else ""
-
-            # The 'company_name' key is no longer included
-            customer_data = {
-                "contact_name": display_name,
-            }
+            
+            customer_data = { "contact_name": display_name }
 
             if email_address:
-                customer_data["contact_persons"] = [
-                    {
-                        "email": email_address,
-                        "is_primary_contact": True
-                    }
-                ]
+                customer_data["contact_persons"] = [{ "email": email_address, "is_primary_contact": True }]
             
             customers_to_create.append(customer_data)
         
         return customers_to_create, None
+
+    # <<< MODIFIED to fix email display and remove company name column >>>
+    def populate_customers_table(self, customers: list):
+        """Clears and populates the customers view table with new data."""
+        self.customers_view_table.setRowCount(0)
+        if not customers:
+            return
+            
+        self.customers_view_table.setRowCount(len(customers))
+        for row, customer in enumerate(customers):
+            # The GET /contacts endpoint returns the primary email at the top level
+            email = customer.get('email', '')
+            
+            name_item = QTableWidgetItem(customer.get('contact_name', 'N/A'))
+            email_item = QTableWidgetItem(email)
+
+            self.customers_view_table.setItem(row, 0, name_item)
+            self.customers_view_table.setItem(row, 1, email_item)
 
     def populate_items_table(self, items: list):
         """Clears and populates the items table with new data."""
@@ -297,6 +325,7 @@ class DashboardWidget(QWidget):
         self.organization_selector.addItem("N/A", None)
         self.organization_selector.blockSignals(False)
         self.populate_items_table([])
+        self.populate_customers_table([])
 
     def clear_add_item_form(self):
         self.item_name_input.clear()

@@ -61,11 +61,23 @@ class InvoiceApi:
                 message = str(e)
             raise ConnectionError(f"Failed to create item: {message}") from e
             
-    # <<< NEW METHOD to create a single customer >>>
+    # <<< NEW METHOD to get the list of customers (contacts) >>>
+    def get_customers(self, access_token: str, organization_id: str) -> dict:
+        """
+        Fetches the list of contacts (customers) for a specific organization.
+        """
+        headers = self._get_auth_headers(access_token)
+        endpoint = f"{self.base_url}/contacts?organization_id={organization_id}"
+
+        try:
+            response = requests.get(endpoint, headers=headers)
+            response.raise_for_status()
+            return response.json()
+        except requests.exceptions.RequestException as e:
+            raise ConnectionError(f"Failed to fetch customers: {e}") from e
+
     def create_customer(self, access_token: str, organization_id: str, customer_data: dict) -> dict:
-        """
-        Creates a new customer in Zoho Invoice.
-        """
+        """Creates a new customer in Zoho Invoice."""
         headers = self._get_auth_headers(access_token)
         endpoint = f"{self.base_url}/contacts?organization_id={organization_id}"
         
@@ -73,7 +85,6 @@ class InvoiceApi:
 
         try:
             response = requests.post(endpoint, headers=headers, json=payload)
-            # We don't raise for status here to handle errors manually in the controller
             return response.json()
         except requests.exceptions.RequestException as e:
             raise ConnectionError(f"Network error creating customer: {e}") from e
