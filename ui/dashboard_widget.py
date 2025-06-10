@@ -289,9 +289,15 @@ class DashboardWidget(QWidget):
         
         self.draft_invoices_table.setRowCount(len(invoices))
         for row, invoice in enumerate(invoices):
-            # Store the invoice ID in the first item for later retrieval
+            # <<< THIS IS THE CHANGE >>>
+            # Store a dictionary of important IDs for later retrieval
+            user_data = {
+                "invoice_id": invoice.get('invoice_id'),
+                "customer_id": invoice.get('customer_id')
+            }
             customer_name_item = QTableWidgetItem(invoice.get('customer_name', 'N/A'))
-            customer_name_item.setData(Qt.ItemDataRole.UserRole, invoice.get('invoice_id'))
+            customer_name_item.setData(Qt.ItemDataRole.UserRole, user_data)
+            # <<< END OF CHANGE >>>
 
             self.draft_invoices_table.setItem(row, 0, customer_name_item)
             self.draft_invoices_table.setItem(row, 1, QTableWidgetItem(invoice.get('invoice_number', '')))
@@ -299,15 +305,15 @@ class DashboardWidget(QWidget):
             self.draft_invoices_table.setItem(row, 3, QTableWidgetItem(invoice.get('due_date', '')))
             self.draft_invoices_table.setItem(row, 4, QTableWidgetItem(f"{invoice.get('total', 0.0):.2f}"))
 
-    def get_selected_invoice_ids(self):
-        """Gets the invoice_ids of the selected rows in the draft invoices table."""
-        ids = []
+    def get_selected_invoice_data(self):
+        """Gets the data dictionaries of the selected rows in the draft invoices table."""
+        data_list = []
         selected_rows = sorted(list(set(index.row() for index in self.draft_invoices_table.selectedIndexes())))
         for row in selected_rows:
             item = self.draft_invoices_table.item(row, 0)
             if item and item.data(Qt.ItemDataRole.UserRole):
-                ids.append(item.data(Qt.ItemDataRole.UserRole))
-        return ids
+                data_list.append(item.data(Qt.ItemDataRole.UserRole))
+        return data_list
 
 
     def add_customer_input_row(self):

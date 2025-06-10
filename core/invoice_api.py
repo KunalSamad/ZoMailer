@@ -18,7 +18,7 @@ class InvoiceApi:
             'Authorization': f'Zoho-oauthtoken {access_token}'
         }
 
-    # ... (get_organizations, get_items, create_item, get_customers, create_customer, create_invoice are all correct and unchanged) ...
+    # ... (get_organizations, get_items, create_item, get_customers, create_customer, create_invoice, get_draft_invoices are all correct and unchanged) ...
     def get_organizations(self, access_token: str) -> dict:
         headers = self._get_auth_headers(access_token)
         endpoint = f"{self.base_url}/organizations"
@@ -95,21 +95,18 @@ class InvoiceApi:
         except requests.exceptions.RequestException as e:
             raise ConnectionError(f"Failed to fetch draft invoices: {e}") from e
 
-    # <<< THIS METHOD CONTAINS THE FIX >>>
-    def send_invoice_email(self, access_token: str, organization_id: str, invoice_id: str) -> dict:
+    # <<< MODIFIED to accept and send an email payload >>>
+    def send_invoice_email(self, access_token: str, organization_id: str, invoice_id: str, email_data: dict) -> dict:
         """
-        Emails an invoice to the customer. This action also automatically
-        changes the invoice's status from 'draft' to 'sent'.
-        The correct API for this is POST /invoices/{invoice_id}/email
+        Emails an invoice to the customer with specific recipients.
+        The API for this is POST /invoices/{invoice_id}/email
         """
         headers = self._get_auth_headers(access_token)
-        
-        # This is the correct endpoint to trigger the email action.
         endpoint = f"{self.base_url}/invoices/{invoice_id}/email?organization_id={organization_id}"
         
         try:
-            # An empty POST request is typically used to trigger the default email action.
-            response = requests.post(endpoint, headers=headers)
+            # Send the email data as the JSON payload
+            response = requests.post(endpoint, headers=headers, json=email_data)
             return response.json()
         except requests.exceptions.RequestException as e:
             raise ConnectionError(f"Network error sending invoice: {e}") from e

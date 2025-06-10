@@ -22,6 +22,7 @@ class AppController:
         self.invoice_api = InvoiceApi()
         self.view = MainWindow()
         self._authorizing_account_index = None
+        self.customer_list_cache = []
         
         # Connect UI signals
         settings_ui = self.view.settings_tab
@@ -31,78 +32,152 @@ class AppController:
         settings_ui.delete_button.clicked.connect(self.handle_delete_account)
         settings_ui.account_selector.currentIndexChanged.connect(self.handle_account_selection_changed)
         settings_ui.authorize_button.clicked.connect(self.handle_authorization_start)
-        
         self.view.redirect_url_intercepted.connect(self.handle_redirect_url)
-        
         # Connect Dashboard signals
         dashboard_ui = self.view.dashboard_widget
         dashboard_ui.organization_selector.currentIndexChanged.connect(self.handle_organization_selection_changed)
         dashboard_ui.change_sender_name_button.clicked.connect(self.handle_open_sender_settings)
         dashboard_ui.view_email_templates_button.clicked.connect(self.handle_view_email_templates)
-        dashboard_ui.refresh_button.clicked.connect(self.handle_refresh_all)
-        # Items Tab
+        #dashboard_ui.refresh_button.clicked.connect(self.handle_refresh_all)
+        dashboard_ui.refresh_button.clicked.connect(self.handle_refresh_data_for_current_org)
+        # Items
         dashboard_ui.add_item_button.clicked.connect(self.handle_add_item)
         dashboard_ui.refresh_items_button.clicked.connect(self.handle_fetch_items)
-        # Customers Tab
+        # Customers
         dashboard_ui.add_customer_row_button.clicked.connect(self.handle_add_customer_row)
         dashboard_ui.remove_customer_row_button.clicked.connect(self.handle_remove_customer_row)
         dashboard_ui.submit_customers_button.clicked.connect(self.handle_submit_customers)
         dashboard_ui.refresh_customers_button.clicked.connect(self.handle_fetch_customers)
-        # <<< NEW CONNECTIONS for the invoice form >>>
+        # Invoice
         dashboard_ui.add_invoice_line_button.clicked.connect(self.handle_add_invoice_line)
         dashboard_ui.remove_invoice_line_button.clicked.connect(self.handle_remove_invoice_line)
         dashboard_ui.create_invoice_button.clicked.connect(self.handle_create_invoice)
-        # <<< CONNECTIONS for the Send Invoice Tab >>>
+        # Send Invoice
         dashboard_ui.refresh_draft_invoices_button.clicked.connect(self.handle_fetch_draft_invoices)
         dashboard_ui.send_selected_invoices_button.clicked.connect(self.handle_send_selected_invoices)
 
         self.refresh_account_list()
 
-    # <<< NEW METHODS to handle the invoice creation process >>>
-    def handle_add_invoice_line(self):
-        """Tells the view to add a new row to the invoice line items table."""
-        self.view.dashboard_widget.add_invoice_line_row()
-
-    def handle_remove_invoice_line(self):
-        """Tells the view to remove the selected row from the invoice line items table."""
-        self.view.dashboard_widget.remove_selected_invoice_line()
-
-    def handle_create_invoice(self):
-        """Gathers data from the form and calls the API to create an invoice."""
-        self.view.statusBar().showMessage("Validating invoice...")
-        
-        # 1. Get and validate data from the form
-        invoice_data, error_msg = self.view.dashboard_widget.get_invoice_data()
-        if error_msg:
-            self.view.show_message("Validation Error", error_msg, level='warning')
+    def handle_fetch_customers(self):
+        """Fetches the customer list and populates UI elements."""
+        self.view.statusBar().showMessage("Fetching customers...")
+        selected_org_data = self.view.dashboard_widget.organization_selector.currentData()
+        if not selected_org_data or 'organization_id' not in selected_org_data:
+            self.view.statusBar().showMessage("Select an organization to view customers.")
+            self.view.dashboard_widget.populate_customers_table([])
+            self.view.dashboard_widget.populate_invoice_customer_dropdown([])
+            return
+        organization_id = selected_org_data['organization_id']
+        account_index = self.view.settings_tab.get_selected_account_index()
+        access_token = self.get_valid_access_token(account_index)
+        if not access_token: return
+        try:
+            response = self.invoice_api.get_customers(access_token, organization_id)
+            if response.get('code') == 0:
+                customers_list = response.get('contacts', [])
+                self.customer_list_cache = customers_list
+                self.view.dashboard_widget.populate_customers_table(customers_list)
+                self.view.dashboard_widget.populate_invoice_customer_dropdown(customers_list)
+                self.view.statusBar().showMessage(f"Successfully fetched {len(customers_list)} customer(s).")
+            else:
+                self.view.show_message("API Error", f"Could not fetch customers: {response.get('message')}", level='critical')
+        except Exception as e:
+            self.view.show_message("Error", f"An unexpected error occurred while fetching customers: {e}", level='critical')
+        finally:
+            self.view.statusBar().showMessage("Ready")
+            
+    # <<< MODIFIED to build and pass the email payload >>>
+    def handle_send_selected_invoices(self):
+        """Performs a pre-flight check then sends valid selected invoices."""
+        selected_invoices = self.view.dashboard_widget.get_selected_invoice_data()
+        if not selected_invoices:
+            self.view.show_message("No Selection", "Please select one or more invoices to send.", level='warning')
             return
 
-        # 2. Get authentication details
+        # Pre-flight Check
+        sendable_invoices = []
+        unsendable_invoices = []
+        customer_map = {c['contact_id']: c for c in self.customer_list_cache}
+
+        for inv_data in selected_invoices:
+            customer = customer_map.get(inv_data['customer_id'])
+            if customer and customer.get('email'):
+                # Store all necessary data for sending
+                sendable_invoices.append({
+                    'invoice_id': inv_data['invoice_id'],
+                    'customer_email': customer.get('email'),
+                    'customer_name': customer.get('contact_name')
+                })
+            else:
+                customer_name_from_table = "Unknown Customer"
+                for row in range(self.view.dashboard_widget.draft_invoices_table.rowCount()):
+                    item_data = self.view.dashboard_widget.draft_invoices_table.item(row, 0).data(Qt.ItemDataRole.UserRole)
+                    if item_data and item_data['invoice_id'] == inv_data['invoice_id']:
+                         customer_name_from_table = self.view.dashboard_widget.draft_invoices_table.item(row, 0).text()
+                         break
+                unsendable_invoices.append(f"'{customer_name_from_table}'")
+
+        if unsendable_invoices:
+            error_list = "\n".join(f"- {name}" for name in unsendable_invoices)
+            msg = f"The following customers have no email address and their invoices cannot be sent:\n\n{error_list}"
+            if not sendable_invoices:
+                self.view.show_message("Cannot Send", msg, level='critical')
+                return
+            else:
+                reply = QMessageBox.question(self.view, "Send Warning", f"{msg}\n\nDo you want to send the {len(sendable_invoices)} valid invoice(s)?", QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+                if reply == QMessageBox.StandardButton.No:
+                    return
+
+        self.send_invoices_with_progress(sendable_invoices)
+
+    def send_invoices_with_progress(self, invoices_to_send: list):
+        """Handles the actual API calls for sending with a progress dialog."""
+        if not invoices_to_send: return
+
         organization_id = self.view.dashboard_widget.organization_selector.currentData()['organization_id']
         account_index = self.view.settings_tab.get_selected_account_index()
         access_token = self.get_valid_access_token(account_index)
-        if not access_token:
-            self.view.show_message("Authentication Error", "Could not get a valid access token.", level='critical')
-            return
+        if not access_token: return
 
-        # 3. Call API to create invoice
-        self.view.statusBar().showMessage("Creating invoice...")
-        try:
-            response = self.invoice_api.create_invoice(access_token, organization_id, invoice_data)
-            if response.get('code') == 0:
-                invoice_id = response['invoice']['invoice_id']
-                self.view.show_message("Success", f"Successfully created invoice with ID: {invoice_id}")
-                self.view.dashboard_widget.clear_invoice_form()
-            else:
-                message = response.get('message', 'An unknown API error occurred.')
-                self.view.show_message("API Error", f"Could not create invoice: {message}", level='critical')
-        except Exception as e:
-            self.view.show_message("Error", f"An unexpected error occurred: {e}", level='critical')
-        finally:
-            self.view.statusBar().showMessage("Ready")
+        progress = QProgressDialog("Sending invoices...", "Cancel", 0, len(invoices_to_send), self.view)
+        progress.setWindowModality(Qt.WindowModality.WindowModal)
 
+        success_count = 0
+        failed_entries = []
+
+        for i, invoice_info in enumerate(invoices_to_send):
+            progress.setValue(i)
+            progress.setLabelText(f"Sending to '{invoice_info['customer_name']}'...")
+            if progress.wasCanceled(): break
+
+            try:
+                # Build the email payload
+                email_payload = {
+                    "to_mail_ids": [ invoice_info['customer_email'] ]
+                }
+                response = self.invoice_api.send_invoice_email(
+                    access_token, 
+                    organization_id, 
+                    invoice_info['invoice_id'],
+                    email_payload
+                )
+                if response.get('code') == 0:
+                    success_count += 1
+                else:
+                    failed_entries.append(f"Invoice for '{invoice_info['customer_name']}': {response.get('message')}")
+            except Exception as e:
+                failed_entries.append(f"Invoice for '{invoice_info['customer_name']}': {e}")
+        
+        progress.setValue(len(invoices_to_send))
+        summary_message = f"Send Complete!\n\n- Successful: {success_count}\n- Failed: {len(failed_entries)}"
+        if failed_entries:
+            summary_message += "\n\nFailures:\n" + "\n".join(f"- {entry}" for entry in failed_entries)
+        QMessageBox.information(self.view, "Send Report", summary_message)
+        
+        self.handle_fetch_draft_invoices()
+
+    # ... (all other methods remain unchanged) ...
     def handle_fetch_draft_invoices(self):
-        """Fetches invoices with 'draft' status and populates the table."""
         self.view.statusBar().showMessage("Fetching draft invoices...")
         selected_org_data = self.view.dashboard_widget.organization_selector.currentData()
         if not selected_org_data or 'organization_id' not in selected_org_data:
@@ -112,8 +187,7 @@ class AppController:
         organization_id = selected_org_data['organization_id']
         account_index = self.view.settings_tab.get_selected_account_index()
         access_token = self.get_valid_access_token(account_index)
-        if not access_token:
-            return
+        if not access_token: return
         try:
             response = self.invoice_api.get_draft_invoices(access_token, organization_id)
             if response.get('code') == 0:
@@ -127,90 +201,53 @@ class AppController:
         finally:
             self.view.statusBar().showMessage("Ready")
 
-    def handle_send_selected_invoices(self):
-        """Sends all selected invoices from the draft table."""
-        selected_ids = self.view.dashboard_widget.get_selected_invoice_ids()
-        if not selected_ids:
-            self.view.show_message("No Selection", "Please select one or more invoices to send.", level='warning')
-            return
+    def run(self):
+        self.view.show()
 
-        reply = QMessageBox.question(
-            self.view, "Confirm Send",
-            f"You are about to send {len(selected_ids)} invoice(s). This action cannot be undone. Continue?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No
-        )
-        if reply == QMessageBox.StandardButton.No:
-            return
+    def handle_refresh_data_for_current_org(self):
+        """Refreshes items, customers, and draft invoices for the current org."""
+        self.view.statusBar().showMessage("Refreshing all data for current organization...")
+        # Note: We do NOT call handle_fetch_organizations() here to prevent an infinite loop.
+        self.handle_fetch_items()
+        self.handle_fetch_customers()
+        self.handle_fetch_draft_invoices()
+        self.view.statusBar().showMessage("All data refreshed.")
+    
+    # def handle_refresh_all(self):
+    #     """Refreshes org details, items, customers, and draft invoices."""
+    #     self.handle_fetch_items()
+    #     self.handle_fetch_customers()
+    #     self.handle_fetch_draft_invoices()
 
+    def handle_create_invoice(self):
+        self.view.statusBar().showMessage("Validating invoice...")
+        invoice_data, error_msg = self.view.dashboard_widget.get_invoice_data()
+        if error_msg:
+            self.view.show_message("Validation Error", error_msg, level='warning')
+            return
         organization_id = self.view.dashboard_widget.organization_selector.currentData()['organization_id']
         account_index = self.view.settings_tab.get_selected_account_index()
         access_token = self.get_valid_access_token(account_index)
         if not access_token:
+            self.view.show_message("Authentication Error", "Could not get a valid access token.", level='critical')
             return
-
-        progress = QProgressDialog("Sending invoices...", "Cancel", 0, len(selected_ids), self.view)
-        progress.setWindowModality(Qt.WindowModality.WindowModal)
-
-        success_count = 0
-        failed_entries = []
-
-        for i, invoice_id in enumerate(selected_ids):
-            progress.setValue(i)
-            if progress.wasCanceled():
-                break
-            try:
-                response = self.invoice_api.send_invoice_email(access_token, organization_id, invoice_id)
-                if response.get('code') == 0:
-                    success_count += 1
-                else:
-                    failed_entries.append(f"Invoice ID {invoice_id}: {response.get('message')}")
-            except Exception as e:
-                failed_entries.append(f"Invoice ID {invoice_id}: {e}")
-        
-        progress.setValue(len(selected_ids))
-
-        summary_message = f"Send Complete!\n\n- Successful: {success_count}\n- Failed: {len(failed_entries)}"
-        if failed_entries:
-            summary_message += "\n\nFailures:\n" + "\n".join(f"- {entry}" for entry in failed_entries)
-        QMessageBox.information(self.view, "Send Report", summary_message)
-        
-        # Refresh the list to show the updated status
-        self.handle_fetch_draft_invoices()
-
-    def handle_fetch_customers(self):
-        """Fetches the customer list and populates both customer tables/dropdowns."""
-        self.view.statusBar().showMessage("Fetching customers...")
-        selected_org_data = self.view.dashboard_widget.organization_selector.currentData()
-        if not selected_org_data or 'organization_id' not in selected_org_data:
-            self.view.statusBar().showMessage("Select an organization to view customers.")
-            self.view.dashboard_widget.populate_customers_table([])
-            self.view.dashboard_widget.populate_invoice_customer_dropdown([])
-            return
-        organization_id = selected_org_data['organization_id']
-        account_index = self.view.settings_tab.get_selected_account_index()
-        access_token = self.get_valid_access_token(account_index)
-        if not access_token:
-            self.view.show_message("Authentication Error", "Could not get access token to fetch customers.", level='critical')
-            self.view.statusBar().showMessage("Ready")
-            return
+        self.view.statusBar().showMessage("Creating invoice...")
         try:
-            response = self.invoice_api.get_customers(access_token, organization_id)
+            response = self.invoice_api.create_invoice(access_token, organization_id, invoice_data)
             if response.get('code') == 0:
-                customers_list = response.get('contacts', [])
-                self.view.dashboard_widget.populate_customers_table(customers_list)
-                self.view.dashboard_widget.populate_invoice_customer_dropdown(customers_list) # Populate invoice form too
-                self.view.statusBar().showMessage(f"Successfully fetched {len(customers_list)} customer(s).")
+                invoice_id = response['invoice']['invoice_id']
+                self.view.show_message("Success", f"Successfully created invoice with ID: {invoice_id}")
+                self.view.dashboard_widget.clear_invoice_form()
+                self.handle_fetch_draft_invoices()
             else:
                 message = response.get('message', 'An unknown API error occurred.')
-                self.view.show_message("API Error", f"Could not fetch customers: {message}", level='critical')
+                self.view.show_message("API Error", f"Could not create invoice: {message}", level='critical')
         except Exception as e:
-            self.view.show_message("Error", f"An unexpected error occurred while fetching customers: {e}", level='critical')
+            self.view.show_message("Error", f"An unexpected error occurred: {e}", level='critical')
         finally:
             self.view.statusBar().showMessage("Ready")
-            
+
     def handle_fetch_items(self):
-        """Fetches the item list and populates the items table and invoice form."""
         self.view.statusBar().showMessage("Fetching items...")
         selected_org_data = self.view.dashboard_widget.organization_selector.currentData()
         if not selected_org_data or 'organization_id' not in selected_org_data:
@@ -229,7 +266,7 @@ class AppController:
             if response.get('code') == 0:
                 items_list = response.get('items', [])
                 self.view.dashboard_widget.populate_items_table(items_list)
-                self.view.dashboard_widget.store_item_list(items_list) # Store for invoice form
+                self.view.dashboard_widget.store_item_list(items_list)
                 self.view.statusBar().showMessage(f"Successfully fetched {len(items_list)} item(s).")
             else:
                 message = response.get('message', 'An unknown API error occurred.')
@@ -239,19 +276,20 @@ class AppController:
         finally:
             self.view.statusBar().showMessage("Ready")
 
-    # ... (all other methods from the previous step remain the same) ...
+    def handle_add_invoice_line(self):
+        self.view.dashboard_widget.add_invoice_line_row()
+
+    def handle_remove_invoice_line(self):
+        self.view.dashboard_widget.remove_selected_invoice_line()
+
     def handle_add_customer_row(self):
-        """Tells the view to add a new row to the customer input table."""
         self.view.dashboard_widget.add_customer_input_row()
 
     def handle_remove_customer_row(self):
-        """Tells the view to remove selected rows from the customer input table."""
         self.view.dashboard_widget.remove_selected_customer_rows()
 
     def handle_submit_customers(self):
-        """Submits all valid customers from the input table to the Zoho API."""
         dashboard_ui = self.view.dashboard_widget
-        
         customers_to_create, error_msg = dashboard_ui.get_and_validate_customer_data()
         if error_msg:
             self.view.show_message("Validation Error", error_msg, level='warning')
@@ -259,16 +297,9 @@ class AppController:
         if not customers_to_create:
             self.view.show_message("No Data", "There are no customers to submit.", level='warning')
             return
-
-        reply = QMessageBox.question(
-            self.view, "Confirm Submission",
-            f"You are about to submit {len(customers_to_create)} customer(s). Continue?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No
-        )
+        reply = QMessageBox.question(self.view, "Confirm Submission", f"You are about to submit {len(customers_to_create)} customer(s). Continue?", QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No)
         if reply == QMessageBox.StandardButton.No:
             return
-
         selected_org_data = dashboard_ui.organization_selector.currentData()
         organization_id = selected_org_data['organization_id']
         account_index = self.view.settings_tab.get_selected_account_index()
@@ -276,19 +307,15 @@ class AppController:
         if not access_token:
             self.view.show_message("Authentication Error", "Could not get a valid access token.", level='critical')
             return
-
         progress = QProgressDialog("Submitting customers...", "Cancel", 0, len(customers_to_create), self.view)
         progress.setWindowModality(Qt.WindowModality.WindowModal)
-        
         success_count = 0
         failed_entries = []
-
         for i, customer in enumerate(customers_to_create):
             progress.setValue(i)
             progress.setLabelText(f"Submitting '{customer['contact_name']}'...")
             if progress.wasCanceled():
                 break
-
             try:
                 response = self.invoice_api.create_customer(access_token, organization_id, customer)
                 if response.get('code') == 0:
@@ -298,68 +325,47 @@ class AppController:
                     failed_entries.append(f"'{customer['contact_name']}': {error}")
             except Exception as e:
                 failed_entries.append(f"'{customer['contact_name']}': {e}")
-        
         progress.setValue(len(customers_to_create))
-
         summary_message = f"Submission Complete!\n\n- Successful: {success_count}\n- Failed: {len(failed_entries)}"
         if failed_entries:
             summary_message += "\n\nFailures:\n" + "\n".join(f"- {entry}" for entry in failed_entries)
-        
         QMessageBox.information(self.view, "Submission Report", summary_message)
-        
         if success_count > 0 and not failed_entries:
              dashboard_ui.customers_input_table.setRowCount(1)
              dashboard_ui.customers_input_table.clearContents()
-
-    def run(self):
-        self.view.show()
-
-    def handle_refresh_all(self):
-        """Refreshes org details, items, and customers."""
-        self.handle_fetch_org_details()
-        self.handle_fetch_items()
-        self.handle_fetch_customers()
-        self.handle_fetch_draft_invoices()
+             self.handle_fetch_customers()
 
     def handle_add_item(self):
-        """Handles the logic for the 'Add Item' button click."""
         dashboard_ui = self.view.dashboard_widget
         item_name = dashboard_ui.item_name_input.text().strip()
         rate_str = dashboard_ui.item_rate_input.text().strip()
         description = dashboard_ui.item_description_input.toPlainText().strip()
-
         if not item_name or not rate_str:
             self.view.show_message("Input Error", "Item Name and Rate are required.", level='warning')
             return
-        
         try:
             rate = float(rate_str)
         except ValueError:
             self.view.show_message("Input Error", "Rate must be a valid number.", level='warning')
             return
-
         selected_org_data = dashboard_ui.organization_selector.currentData()
         if not selected_org_data or 'organization_id' not in selected_org_data:
             self.view.show_message("Error", "Please select a valid organization from the 'Account Details' tab first.", level='critical')
             return
         organization_id = selected_org_data['organization_id']
-
         self.view.statusBar().showMessage("Authenticating...")
         account_index = self.view.settings_tab.get_selected_account_index()
         if account_index is None:
              self.view.show_message("Error", "Please select a valid account first.", level='critical')
              self.view.statusBar().showMessage("Ready")
              return
-             
         access_token = self.get_valid_access_token(account_index)
         if not access_token:
             self.view.show_message("Authentication Error", "Could not get a valid access token.", level='critical')
             self.view.statusBar().showMessage("Ready")
             return
-
         self.view.statusBar().showMessage(f"Adding item '{item_name}'...")
         item_payload = { "name": item_name, "rate": rate, "description": description }
-
         try:
             response = self.invoice_api.create_item(access_token, organization_id, item_payload)
             if response.get('code') == 0:
@@ -375,45 +381,39 @@ class AppController:
             self.view.statusBar().showMessage("Ready")
 
     def handle_organization_selection_changed(self):
-        """Displays org details and fetches items/customers for the selected org."""
+        """Displays org details and fetches all data for the selected org."""
         selected_org_data = self.view.dashboard_widget.organization_selector.currentData()
         self.view.dashboard_widget.display_organization_details(selected_org_data)
         if selected_org_data:
-            self.handle_fetch_items()
-            self.handle_fetch_customers()
-            self.handle_fetch_draft_invoices()
+            self.handle_refresh_data_for_current_org()
         
     def handle_view_email_templates(self):
         selected_org_data = self.view.dashboard_widget.organization_selector.currentData()
         if not selected_org_data or 'organization_id' not in selected_org_data:
             self.view.show_message("Action Blocked", "Please select a valid organization from the dropdown first.", level='warning')
             return
-        
         org_id = selected_org_data['organization_id']
         url = f"https://invoice.zoho.com/app/{org_id}#/settings/emails/templates?email_type=invoice_notification"
-        
         self.view.statusBar().showMessage("Opening email templates list...")
         self.view.open_url_in_browser_tab(url)
 
-    def handle_fetch_org_details(self):
+    def handle_fetch_organizations(self):
         """Fetches org data and populates the organization dropdown."""
-        self.view.statusBar().showMessage("Refreshing organization details...")
+        self.view.statusBar().showMessage("Refreshing organization list...")
         index = self.view.settings_tab.get_selected_account_index()
         if index is None or index <= 0:
             self.view.statusBar().showMessage("Cannot refresh: No authorized account selected.")
             return
-
         access_token = self.get_valid_access_token(index)
         if not access_token:
             self.view.statusBar().showMessage("Refresh failed: Could not get access token.")
             return
-
         try:
             org_data = self.invoice_api.get_organizations(access_token)
             if org_data.get('code') == 0 and org_data.get('organizations'):
                 organizations_list = org_data['organizations']
                 self.view.dashboard_widget.populate_organizations_list(organizations_list)
-                self.view.statusBar().showMessage(f"Successfully refreshed and loaded {len(organizations_list)} organization(s).")
+                self.view.statusBar().showMessage(f"Successfully loaded {len(organizations_list)} organization(s).")
             else:
                 message = org_data.get('message', 'Unknown API error.')
                 self.view.show_message("API Error", f"Failed to get organization details: {message}", level='critical')
@@ -427,7 +427,6 @@ class AppController:
         if not selected_org_data or 'organization_id' not in selected_org_data:
             self.view.show_message("Action Blocked","Please select a valid organization from the dropdown first.", level='warning')
             return
-        
         org_id = selected_org_data['organization_id']
         url = f"https://invoice.zoho.com/app/{org_id}#/settings/emails/preference"
         self.view.open_url_in_browser_tab(url)
@@ -441,10 +440,7 @@ class AppController:
             return creds.get('access_token')
         try:
             token_data = self.auth_manager.refresh_access_token(creds['client_id'], creds['client_secret'], creds['refresh_token'])
-            data_to_save = {
-                'access_token': token_data['access_token'],
-                'token_expiry_timestamp': int(time.time()) + token_data.get('expires_in', 3600)
-            }
+            data_to_save = { 'access_token': token_data['access_token'], 'token_expiry_timestamp': int(time.time()) + token_data.get('expires_in', 3600) }
             self.config_manager.save_credentials(account_index, data_to_save)
             return data_to_save['access_token']
         except Exception as e:
@@ -461,14 +457,10 @@ class AppController:
             return
         credentials = self.config_manager.load_credentials(index)
         is_authorized = bool(credentials.get("refresh_token"))
-        self.view.settings_tab.set_credentials(
-            credentials.get("client_id"),
-            credentials.get("client_secret"),
-            credentials.get("refresh_token")
-        )
+        self.view.settings_tab.set_credentials(credentials.get("client_id"), credentials.get("client_secret"), credentials.get("refresh_token"))
         self.view.statusBar().showMessage(f"Selected Account {index}")
         if is_authorized:
-            self.handle_fetch_org_details()
+            self.handle_fetch_organizations()
             
     def prepare_for_add_new(self):
         self.view.settings_tab.set_unsaved_account_mode()
